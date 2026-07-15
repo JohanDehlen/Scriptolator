@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+.venv/
+
+# VS Code
+.vscode/
+
+# Build output
+dist/
+build/
+
+# Generated audio
+output/*.mp3
+output/*.wav
+
+# Temporary files
+temp/
