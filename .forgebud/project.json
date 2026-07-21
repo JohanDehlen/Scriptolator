@@ -1,0 +1,11 @@
+{
+    "name": "Voiceanator",
+    "version": "0.1.0",
+    "description": "AI-powered voice generation and narration application.",
+    "language": "Python",
+    "framework": "PySide6",
+    "repository": "C:\\Projects\\Voiceanator",
+    "created_by": "ForgeBud",
+    "forgebud_version": "0.3.0",
+    "assistant_rules": []
+}
