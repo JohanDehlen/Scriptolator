@@ -1,10 +1,10 @@
 {
-    "name": "Voiceanator",
-    "version": "0.1.0",
-    "description": "AI-powered voice generation and narration application.",
+    "name": "Scriptalator",
+    "version": "0.5.0",
+    "description": "Desktop application for transforming scripts into professional AI narration.",
     "language": "Python",
     "framework": "PySide6",
-    "repository": "C:\\Projects\\Voiceanator",
+    "repository": "C:\\Projects\\Scriptalator",
     "created_by": "ForgeBud",
     "forgebud_version": "0.3.0",
     "assistant_rules": []

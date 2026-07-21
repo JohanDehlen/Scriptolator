@@ -1,5 +1,5 @@
 @echo off
 
-.venv\Scripts\python.exe src\voiceanator\main.py
+.venv\Scripts\python.exe src\scriptalator\main.py
 
 pause

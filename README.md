@@ -1,55 +1,49 @@
-# Voiceanator
+# Scriptalator
 
-**Professional AI Narration Software for Content Creators**
+**Transform scripts into professional AI narration**
 
-Voiceanator is a desktop application for Windows that uses Microsoft's Edge Neural Voices to generate high-quality AI narration.
+Scriptalator is a Windows desktop application that converts written scripts into high-quality MP3 narration using Microsoft Edge Neural Voices.
 
-The goal is to create the easiest and most powerful free narration tool for YouTubers, educators, podcasters, audiobook creators, and anyone who needs realistic text-to-speech audio.
+It is designed for content creators who need a fast, simple way to turn scripts into professional narration without paying for a separate text-to-speech service.
 
----
-
-## Planned Features
+## Current Features
 
 - High-quality Microsoft Edge Neural Voices
+- Language and voice filtering
 - Voice preview
-- Adjustable speaking rate
+- Adjustable speaking speed
 - Adjustable pitch
-- MP3 generation
-- Pronunciation dictionary
-- Project save/load
-- Batch narration
-- Subtitle (SRT) export
-- Modern Windows interface
-
----
+- Adjustable volume
+- Visible slider values and centre markers
+- Double-click slider reset
+- MP3 narration generation
+- Responsive background audio generation
+- Output folder and filename selection
+- Output overwrite protection
+- Play generated narration
+- Open the output folder
+- Remembers the last selected voice
+- Remembers the last output folder
+- Remembers the last output filename
+- Script word count
+- Estimated narration duration
 
 ## Current Version
 
-**0.2.0 (In Development)**
-
----
+**0.5.0**
 
 ## Requirements
 
-- Python 3.14+
+- Windows
+- Python 3.14 or later
 - PySide6
 - edge-tts
 - mutagen
 
-Install dependencies:
+## Installation
 
-```bash
-pip install -r requirements.txt
-```
+Clone the repository:
 
-Run the application:
-
-```bash
-python src/narratorstudio/main.py
-```
-
----
-
-## License
-
-This project is currently under development.
+```bat
+git clone https://github.com/JohanDehlen/Scriptalator.git
+cd Scriptalator
