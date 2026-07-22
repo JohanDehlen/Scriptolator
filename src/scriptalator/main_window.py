@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QInputDialog,
     QMainWindow,
     QMessageBox,
     QVBoxLayout,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from services.edge_tts_service import EdgeTTSService
+from services.profile_service import ProfileService
 from services.project_service import ProjectService
 from services.settings_service import SettingsService
 from version import APP_NAME, APP_VERSION
@@ -86,6 +88,11 @@ class MainWindow(QMainWindow):
         self.settings_service = SettingsService(
             self.project_root
         )
+        self.profile_service = ProfileService(
+            self.project_root
+        )
+        self._applying_profile = False
+        self._loaded_profile_data: dict[str, object] | None = None
 
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.resize(1280, 850)
@@ -168,6 +175,7 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.statusBarWidget)
 
         self._restore_application_settings()
+        self._initialize_profiles()
         self.voicePanel.set_preview_text_provider(
             self._get_preview_text
         )
@@ -236,6 +244,9 @@ class MainWindow(QMainWindow):
             volume=self.voicePanel.volumeSlider.value(),
         )
 
+        if not self._applying_profile:
+            self._update_profile_modified_state()
+
     def _save_output_folder(self) -> None:
         """Store the current output folder."""
 
@@ -300,6 +311,396 @@ class MainWindow(QMainWindow):
         )
         self.scriptEditor.script_file_dropped.connect(
             self._load_dropped_script_file
+        )
+
+        profile_controls = self.voicePanel.profileControls
+        profile_controls.profile_selected.connect(
+            self._profile_selected
+        )
+        profile_controls.new_requested.connect(
+            self._new_profile
+        )
+        profile_controls.save_requested.connect(
+            self._save_profile
+        )
+        profile_controls.rename_requested.connect(
+            self._rename_profile
+        )
+        profile_controls.delete_requested.connect(
+            self._delete_profile
+        )
+        profile_controls.open_folder_requested.connect(
+            self._open_profiles_folder
+        )
+
+    def _initialize_profiles(self) -> None:
+        """Load available profiles and restore the last selection."""
+
+        controls = self.voicePanel.profileControls
+
+        try:
+            profile_names = self.profile_service.list_profiles()
+        except RuntimeError as error:
+            QMessageBox.critical(
+                self,
+                "Unable to Load Profiles",
+                str(error),
+            )
+            controls.set_profiles([])
+            return
+
+        last_profile = self.settings_service.get_last_profile()
+
+        if last_profile not in profile_names:
+            last_profile = ""
+            self.settings_service.clear_last_profile()
+
+        controls.set_profiles(
+            profile_names=profile_names,
+            selected_profile=last_profile,
+        )
+
+        if last_profile:
+            self._load_profile_by_name(
+                last_profile,
+                show_error=True,
+            )
+
+    def _collect_profile_data(self) -> dict[str, object]:
+        """Collect the current reusable narration settings."""
+
+        return {
+            "language": str(
+                self.voicePanel.languageFilter.currentData() or ""
+            ),
+            "voice": self.voicePanel.voiceCombo.currentText().strip(),
+            "speed": self.voicePanel.speedSlider.value(),
+            "pitch": self.voicePanel.pitchSlider.value(),
+            "volume": self.voicePanel.volumeSlider.value(),
+        }
+
+    def _apply_profile_data(
+        self,
+        profile_data: dict[str, object],
+    ) -> None:
+        """Apply narration settings from a saved profile."""
+
+        self._applying_profile = True
+
+        try:
+            language = str(profile_data["language"])
+            voice = str(profile_data["voice"])
+
+            language_index = (
+                self.voicePanel.languageFilter.findData(language)
+            )
+
+            if language_index < 0:
+                language_index = 0
+
+            self.voicePanel.languageFilter.setCurrentIndex(
+                language_index
+            )
+
+            voice_index = self.voicePanel.voiceCombo.findText(voice)
+
+            if voice_index < 0:
+                raise ValueError(
+                    "The profile voice is not currently available."
+                )
+
+            self.voicePanel.voiceCombo.setCurrentIndex(voice_index)
+            self.voicePanel.speedSlider.setValue(
+                int(profile_data["speed"])
+            )
+            self.voicePanel.pitchSlider.setValue(
+                int(profile_data["pitch"])
+            )
+            self.voicePanel.volumeSlider.setValue(
+                int(profile_data["volume"])
+            )
+        finally:
+            self._applying_profile = False
+
+        self._save_voice_preferences()
+
+    def _profile_selected(self, profile_name: str) -> None:
+        """Load the narration profile selected by the user."""
+
+        if not profile_name:
+            self._loaded_profile_data = None
+            self.settings_service.clear_last_profile()
+            self.voicePanel.profileControls.set_modified(False)
+            self.statusBarWidget.setText("No narration profile selected.")
+            return
+
+        self._load_profile_by_name(
+            profile_name,
+            show_error=True,
+        )
+
+    def _load_profile_by_name(
+        self,
+        profile_name: str,
+        show_error: bool,
+    ) -> bool:
+        """Load and apply a profile by name."""
+
+        try:
+            loaded_data = self.profile_service.load_profile(
+                profile_name
+            )
+            self._apply_profile_data(loaded_data)
+        except (
+            FileNotFoundError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as error:
+            self._loaded_profile_data = None
+            self.settings_service.clear_last_profile()
+            self.voicePanel.profileControls.select_no_profile()
+
+            if show_error:
+                QMessageBox.critical(
+                    self,
+                    "Unable to Load Profile",
+                    str(error),
+                )
+
+            return False
+
+        self._loaded_profile_data = {
+            key: loaded_data[key]
+            for key in (
+                "language",
+                "voice",
+                "speed",
+                "pitch",
+                "volume",
+            )
+        }
+        self.settings_service.set_last_profile(profile_name)
+        self.voicePanel.profileControls.set_modified(False)
+        self.statusBarWidget.setText(
+            f"Narration profile loaded: {profile_name}"
+        )
+
+        return True
+
+    def _new_profile(self) -> None:
+        """Create a user-named profile from current settings."""
+
+        profile_name, accepted = QInputDialog.getText(
+            self,
+            "Create Narration Profile",
+            "Profile name:",
+        )
+
+        if not accepted:
+            return
+
+        try:
+            self.profile_service.create_profile(
+                profile_name,
+                self._collect_profile_data(),
+            )
+        except (
+            FileExistsError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as error:
+            QMessageBox.warning(
+                self,
+                "Unable to Create Profile",
+                str(error),
+            )
+            return
+
+        normalized_name = profile_name.strip()
+        self.voicePanel.profileControls.add_profile(
+            normalized_name
+        )
+        self._loaded_profile_data = self._collect_profile_data()
+        self.settings_service.set_last_profile(normalized_name)
+        self.voicePanel.profileControls.set_modified(False)
+        self.statusBarWidget.setText(
+            f"Narration profile created: {normalized_name}"
+        )
+
+    def _save_profile(self) -> None:
+        """Save current settings into the selected profile."""
+
+        profile_name = (
+            self.voicePanel.profileControls.current_profile_name()
+        )
+
+        if not profile_name:
+            return
+
+        profile_data = self._collect_profile_data()
+
+        try:
+            self.profile_service.save_profile(
+                profile_name,
+                profile_data,
+            )
+        except (
+            FileNotFoundError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as error:
+            QMessageBox.critical(
+                self,
+                "Unable to Save Profile",
+                str(error),
+            )
+            return
+
+        self._loaded_profile_data = profile_data
+        self.settings_service.set_last_profile(profile_name)
+        self.voicePanel.profileControls.set_modified(False)
+        self.statusBarWidget.setText(
+            f"Narration profile saved: {profile_name}"
+        )
+
+    def _rename_profile(self) -> None:
+        """Rename the selected narration profile."""
+
+        controls = self.voicePanel.profileControls
+        current_name = controls.current_profile_name()
+
+        if not current_name:
+            return
+
+        new_name, accepted = QInputDialog.getText(
+            self,
+            "Rename Narration Profile",
+            "New profile name:",
+            text=current_name,
+        )
+
+        if not accepted:
+            return
+
+        try:
+            self.profile_service.rename_profile(
+                current_name,
+                new_name,
+            )
+        except (
+            FileExistsError,
+            FileNotFoundError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as error:
+            QMessageBox.warning(
+                self,
+                "Unable to Rename Profile",
+                str(error),
+            )
+            return
+
+        normalized_name = new_name.strip()
+        controls.rename_profile(
+            current_name,
+            normalized_name,
+        )
+        self.settings_service.set_last_profile(normalized_name)
+        self.statusBarWidget.setText(
+            f"Narration profile renamed: {normalized_name}"
+        )
+
+    def _delete_profile(self) -> None:
+        """Delete the selected narration profile after confirmation."""
+
+        controls = self.voicePanel.profileControls
+        profile_name = controls.current_profile_name()
+
+        if not profile_name:
+            return
+
+        response = QMessageBox.question(
+            self,
+            "Delete Narration Profile?",
+            (
+                f'Delete profile "{profile_name}"?\n\n'
+                "This cannot be undone."
+            ),
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if response != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            self.profile_service.delete_profile(profile_name)
+        except (FileNotFoundError, RuntimeError, ValueError) as error:
+            QMessageBox.critical(
+                self,
+                "Unable to Delete Profile",
+                str(error),
+            )
+            return
+
+        controls.remove_profile(profile_name)
+        self._loaded_profile_data = None
+        self.settings_service.clear_last_profile()
+        self.statusBarWidget.setText(
+            f"Narration profile deleted: {profile_name}"
+        )
+
+    def _open_profiles_folder(self) -> None:
+        """Open the narration profiles folder in the file manager."""
+
+        try:
+            profiles_folder = (
+                self.profile_service.ensure_profiles_folder()
+            )
+        except RuntimeError as error:
+            QMessageBox.critical(
+                self,
+                "Unable to Open Profiles Folder",
+                str(error),
+            )
+            return
+
+        opened = QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(profiles_folder.resolve()))
+        )
+
+        if not opened:
+            QMessageBox.critical(
+                self,
+                "Unable to Open Profiles Folder",
+                "Windows could not open the profiles folder.",
+            )
+            return
+
+        self.statusBarWidget.setText(
+            f"Opened profiles folder: {profiles_folder}"
+        )
+
+    def _update_profile_modified_state(self) -> None:
+        """Mark the selected profile when settings differ from disk."""
+
+        controls = self.voicePanel.profileControls
+
+        if (
+            not controls.current_profile_name()
+            or self._loaded_profile_data is None
+        ):
+            controls.set_modified(False)
+            return
+
+        controls.set_modified(
+            self._collect_profile_data()
+            != self._loaded_profile_data
         )
 
     def _create_shortcuts(self) -> None:
@@ -876,6 +1277,7 @@ class MainWindow(QMainWindow):
         self.outputPanel.filename.setEnabled(enabled)
         self.outputPanel.browse.setEnabled(enabled)
 
+        self.voicePanel.profileControls.setEnabled(enabled)
         self.voicePanel.languageFilter.setEnabled(enabled)
         self.voicePanel.voiceCombo.setEnabled(enabled)
         self.voicePanel.speedSlider.setEnabled(enabled)

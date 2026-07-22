@@ -16,6 +16,7 @@ class SettingsService:
     PITCH_KEY = "narration/pitch"
     VOLUME_KEY = "narration/volume"
     FAVORITE_VOICES_KEY = "narration/favorite_voices"
+    LAST_PROFILE_KEY = "narration/last_profile"
     OUTPUT_FOLDER_KEY = "output/last_folder"
 
     LEGACY_OUTPUT_FILENAME_KEY = "output/last_filename"
@@ -28,6 +29,7 @@ class SettingsService:
     DEFAULT_SPEED = 0
     DEFAULT_PITCH = 0
     DEFAULT_VOLUME = 100
+    DEFAULT_PROFILE = ""
 
     def __init__(self, project_root: Path) -> None:
         self.project_root = Path(project_root)
@@ -79,6 +81,30 @@ class SettingsService:
             self.VOICE_KEY,
             normalized_voice,
         )
+        self.settings.sync()
+
+    def get_last_profile(self) -> str:
+        """Return the last selected narration profile name."""
+
+        return self.settings.value(
+            self.LAST_PROFILE_KEY,
+            self.DEFAULT_PROFILE,
+            type=str,
+        ).strip()
+
+    def set_last_profile(self, profile_name: str) -> None:
+        """Store the last selected narration profile name."""
+
+        self.settings.setValue(
+            self.LAST_PROFILE_KEY,
+            profile_name.strip(),
+        )
+        self.settings.sync()
+
+    def clear_last_profile(self) -> None:
+        """Clear the saved last-profile selection."""
+
+        self.settings.remove(self.LAST_PROFILE_KEY)
         self.settings.sync()
 
     def get_favorite_voices(self) -> list[str]:

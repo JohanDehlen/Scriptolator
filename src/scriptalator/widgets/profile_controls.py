@@ -1,8 +1,10 @@
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -10,19 +12,22 @@ from PySide6.QtWidgets import (
 
 
 class ProfileControls(QWidget):
-    """Display controls for user-defined narration profiles."""
+    """Display compact controls for user-defined narration profiles."""
 
     profile_selected = Signal(str)
     new_requested = Signal()
     save_requested = Signal()
     rename_requested = Signal()
     delete_requested = Signal()
+    open_folder_requested = Signal()
 
     NO_PROFILE_TEXT = "No Profile"
     NO_PROFILE_VALUE = ""
 
     def __init__(self) -> None:
         super().__init__()
+
+        self._profile_modified = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 8)
@@ -33,45 +38,76 @@ class ProfileControls(QWidget):
 
         layout.addWidget(heading)
 
+        selection_layout = QHBoxLayout()
+        selection_layout.setSpacing(6)
+
         self.profileCombo = QComboBox()
         self.profileCombo.addItem(
             self.NO_PROFILE_TEXT,
             self.NO_PROFILE_VALUE,
         )
 
-        layout.addWidget(self.profileCombo)
+        self.menuButton = QPushButton("⚙")
+        self.menuButton.setFixedWidth(38)
+        self.menuButton.setToolTip("Manage narration profiles")
 
-        button_layout = QHBoxLayout()
+        selection_layout.addWidget(self.profileCombo, 1)
+        selection_layout.addWidget(self.menuButton)
 
-        self.newButton = QPushButton("New")
-        self.saveButton = QPushButton("Save")
-        self.renameButton = QPushButton("Rename")
-        self.deleteButton = QPushButton("Delete")
+        layout.addLayout(selection_layout)
 
-        button_layout.addWidget(self.newButton)
-        button_layout.addWidget(self.saveButton)
-        button_layout.addWidget(self.renameButton)
-        button_layout.addWidget(self.deleteButton)
+        self.profileMenu = QMenu(self)
 
-        layout.addLayout(button_layout)
+        self.newAction = QAction(
+            "New Profile...",
+            self,
+        )
+        self.saveAction = QAction(
+            "Save Profile",
+            self,
+        )
+        self.renameAction = QAction(
+            "Rename Profile...",
+            self,
+        )
+        self.deleteAction = QAction(
+            "Delete Profile...",
+            self,
+        )
+        self.openFolderAction = QAction(
+            "Open Profiles Folder",
+            self,
+        )
+
+        self.profileMenu.addAction(self.newAction)
+        self.profileMenu.addAction(self.saveAction)
+        self.profileMenu.addAction(self.renameAction)
+        self.profileMenu.addAction(self.deleteAction)
+        self.profileMenu.addSeparator()
+        self.profileMenu.addAction(self.openFolderAction)
+
+        self.menuButton.setMenu(self.profileMenu)
 
         self.profileCombo.currentIndexChanged.connect(
             self._profile_changed
         )
-        self.newButton.clicked.connect(
+        self.newAction.triggered.connect(
             self.new_requested.emit
         )
-        self.saveButton.clicked.connect(
+        self.saveAction.triggered.connect(
             self.save_requested.emit
         )
-        self.renameButton.clicked.connect(
+        self.renameAction.triggered.connect(
             self.rename_requested.emit
         )
-        self.deleteButton.clicked.connect(
+        self.deleteAction.triggered.connect(
             self.delete_requested.emit
         )
+        self.openFolderAction.triggered.connect(
+            self.open_folder_requested.emit
+        )
 
-        self._update_action_buttons()
+        self._update_action_states()
 
     def set_profiles(
         self,
@@ -113,7 +149,9 @@ class ProfileControls(QWidget):
         self.profileCombo.setCurrentIndex(selected_index)
         self.profileCombo.blockSignals(False)
 
-        self._update_action_buttons()
+        self._profile_modified = False
+        self._refresh_current_profile_label()
+        self._update_action_states()
 
     def current_profile_name(self) -> str:
         """Return the selected user-defined profile name."""
@@ -164,6 +202,7 @@ class ProfileControls(QWidget):
 
         if existing_index >= 0:
             self.profileCombo.setCurrentIndex(existing_index)
+            self.set_modified(False)
             return
 
         self.profileCombo.addItem(
@@ -173,6 +212,7 @@ class ProfileControls(QWidget):
 
         self._sort_profiles()
         self.select_profile(normalized_name)
+        self.set_modified(False)
 
     def remove_profile(
         self,
@@ -188,6 +228,7 @@ class ProfileControls(QWidget):
             self.profileCombo.removeItem(profile_index)
 
         self.select_no_profile()
+        self.set_modified(False)
 
     def rename_profile(
         self,
@@ -205,10 +246,6 @@ class ProfileControls(QWidget):
 
         normalized_new_name = new_name.strip()
 
-        self.profileCombo.setItemText(
-            current_index,
-            normalized_new_name,
-        )
         self.profileCombo.setItemData(
             current_index,
             normalized_new_name,
@@ -216,25 +253,77 @@ class ProfileControls(QWidget):
 
         self._sort_profiles()
         self.select_profile(normalized_new_name)
+        self.set_modified(False)
+
+    def set_modified(
+        self,
+        modified: bool,
+    ) -> None:
+        """Show whether the selected profile has unsaved changes."""
+
+        self._profile_modified = (
+            bool(modified)
+            and bool(self.current_profile_name())
+        )
+
+        self._refresh_current_profile_label()
+        self._update_action_states()
+
+    def is_modified(self) -> bool:
+        """Return whether the selected profile has unsaved changes."""
+
+        return self._profile_modified
 
     def _profile_changed(self) -> None:
-        """Report the selected profile and update button state."""
+        """Report the selected profile and reset modified state."""
 
-        self._update_action_buttons()
+        self._profile_modified = False
+        self._refresh_current_profile_label()
+        self._update_action_states()
+
         self.profile_selected.emit(
             self.current_profile_name()
         )
 
-    def _update_action_buttons(self) -> None:
+    def _refresh_current_profile_label(self) -> None:
+        """Update the selected profile label and modified marker."""
+
+        current_index = self.profileCombo.currentIndex()
+
+        if current_index < 0:
+            return
+
+        profile_name = self.current_profile_name()
+
+        if not profile_name:
+            self.profileCombo.setItemText(
+                current_index,
+                self.NO_PROFILE_TEXT,
+            )
+            return
+
+        display_text = profile_name
+
+        if self._profile_modified:
+            display_text = f"{profile_name} *"
+
+        self.profileCombo.setItemText(
+            current_index,
+            display_text,
+        )
+
+    def _update_action_states(self) -> None:
         """Enable actions that require a selected profile."""
 
         has_profile = bool(
             self.current_profile_name()
         )
 
-        self.saveButton.setEnabled(has_profile)
-        self.renameButton.setEnabled(has_profile)
-        self.deleteButton.setEnabled(has_profile)
+        self.saveAction.setEnabled(
+            has_profile and self._profile_modified
+        )
+        self.renameAction.setEnabled(has_profile)
+        self.deleteAction.setEnabled(has_profile)
 
     def _sort_profiles(self) -> None:
         """Sort profiles while keeping No Profile first."""
