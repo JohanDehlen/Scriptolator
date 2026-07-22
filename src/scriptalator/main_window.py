@@ -1,7 +1,12 @@
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QThread, QUrl, Signal
-from PySide6.QtGui import QCloseEvent, QDesktopServices
+from PySide6.QtCore import QThread, QUrl, Signal
+from PySide6.QtGui import (
+    QCloseEvent,
+    QDesktopServices,
+    QKeySequence,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QFileDialog,
     QGroupBox,
@@ -14,10 +19,13 @@ from PySide6.QtWidgets import (
 )
 
 from services.edge_tts_service import EdgeTTSService
+from services.project_service import ProjectService
+from services.settings_service import SettingsService
 from version import APP_NAME, APP_VERSION
 from widgets.button_bar import ButtonBar
 from widgets.output_panel import OutputPanel
 from widgets.script_editor import ScriptEditor
+from widgets.script_statistics import ScriptStatistics
 from widgets.status_bar import StatusBar
 from widgets.voice_panel import VoicePanel
 
@@ -67,28 +75,17 @@ class NarrationGenerationThread(QThread):
 class MainWindow(QMainWindow):
     """Main application window for Scriptalator."""
 
-    ORGANIZATION_NAME = "JohanDehlen"
-    PREVIOUS_APPLICATION_NAME = "Voiceanator"
-
-    VOICE_SETTING_KEY = "narration/last_voice"
-    OUTPUT_FOLDER_SETTING_KEY = "output/last_folder"
-    LEGACY_OUTPUT_FILENAME_SETTING_KEY = "output/last_filename"
-    SETTINGS_MIGRATED_KEY = "application/voiceanator_settings_migrated"
-
     def __init__(self) -> None:
         super().__init__()
 
         self.project_root = Path(__file__).resolve().parents[2]
+        self.current_project_path: Path | None = None
         self.last_generated_path: Path | None = None
         self.generation_thread: NarrationGenerationThread | None = None
 
-        self.settings = QSettings(
-            self.ORGANIZATION_NAME,
-            APP_NAME,
+        self.settings_service = SettingsService(
+            self.project_root
         )
-
-        self._migrate_previous_settings()
-        self._remove_legacy_filename_setting()
 
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.resize(1280, 850)
@@ -121,8 +118,10 @@ class MainWindow(QMainWindow):
         script_layout = QVBoxLayout()
 
         self.scriptEditor = ScriptEditor()
+        self.scriptStatistics = ScriptStatistics()
 
         script_layout.addWidget(self.scriptEditor)
+        script_layout.addWidget(self.scriptStatistics)
         script_group.setLayout(script_layout)
 
         left_layout.addWidget(script_group)
@@ -168,142 +167,74 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(self.statusBarWidget)
 
-        self._restore_output_settings()
-        self._restore_last_voice()
+        self._restore_application_settings()
+        self.voicePanel.set_preview_text_provider(
+            self._get_preview_text
+        )
         self._connect_actions()
+        self._create_shortcuts()
+        self._update_script_statistics()
 
-    def _migrate_previous_settings(self) -> None:
-        """Copy relevant Voiceanator settings into Scriptalator once."""
+        self.scriptEditor.editor.setFocus()
 
-        migration_complete = self.settings.value(
-            self.SETTINGS_MIGRATED_KEY,
-            False,
-            type=bool,
+    def _restore_application_settings(self) -> None:
+        """Restore saved narration and output preferences."""
+
+        language = self.settings_service.get_language()
+        voice = self.settings_service.get_voice()
+
+        language_index = self.voicePanel.languageFilter.findData(
+            language
         )
 
-        if migration_complete:
-            return
+        if language_index < 0:
+            language_index = 0
 
-        previous_settings = QSettings(
-            self.ORGANIZATION_NAME,
-            self.PREVIOUS_APPLICATION_NAME,
+        self.voicePanel.languageFilter.setCurrentIndex(
+            language_index
         )
 
-        setting_keys = (
-            self.VOICE_SETTING_KEY,
-            self.OUTPUT_FOLDER_SETTING_KEY,
-        )
-
-        for setting_key in setting_keys:
-            if self.settings.contains(setting_key):
-                continue
-
-            if not previous_settings.contains(setting_key):
-                continue
-
-            self.settings.setValue(
-                setting_key,
-                previous_settings.value(setting_key),
-            )
-
-        self.settings.setValue(
-            self.SETTINGS_MIGRATED_KEY,
-            True,
-        )
-        self.settings.sync()
-
-    def _remove_legacy_filename_setting(self) -> None:
-        """Remove the old saved filename so each session starts blank."""
-
-        if self.settings.contains(
-            self.LEGACY_OUTPUT_FILENAME_SETTING_KEY
-        ):
-            self.settings.remove(
-                self.LEGACY_OUTPUT_FILENAME_SETTING_KEY
-            )
-            self.settings.sync()
-
-    def _restore_output_settings(self) -> None:
-        """Restore the output folder and begin with a blank filename."""
-
-        default_output_folder = self.project_root / "output"
-
-        saved_folder = self.settings.value(
-            self.OUTPUT_FOLDER_SETTING_KEY,
-            str(default_output_folder),
-            type=str,
-        ).strip()
-
-        output_folder = self._resolve_output_folder(
-            saved_folder=saved_folder,
-            default_output_folder=default_output_folder,
-        )
-
-        self.outputPanel.folder.setText(str(output_folder))
-        self.outputPanel.filename.clear()
-
-        self.settings.setValue(
-            self.OUTPUT_FOLDER_SETTING_KEY,
-            str(output_folder),
-        )
-        self.settings.sync()
-
-    @staticmethod
-    def _resolve_output_folder(
-        saved_folder: str,
-        default_output_folder: Path,
-    ) -> Path:
-        """Return the appropriate output folder after the project rename."""
-
-        if not saved_folder:
-            return default_output_folder
-
-        saved_path = Path(saved_folder).expanduser()
-
-        is_voiceanator_output = (
-            saved_path.name.lower() == "output"
-            and saved_path.parent.name.lower() == "voiceanator"
-        )
-
-        if is_voiceanator_output:
-            return default_output_folder
-
-        return saved_path
-
-    def _restore_last_voice(self) -> None:
-        """Restore the voice selected during the previous session."""
-
-        saved_voice = self.settings.value(
-            self.VOICE_SETTING_KEY,
-            "",
-            type=str,
-        ).strip()
-
-        if not saved_voice:
-            return
-
-        voice_index = self.voicePanel.voiceCombo.findText(
-            saved_voice
-        )
+        voice_index = self.voicePanel.voiceCombo.findText(voice)
 
         if voice_index >= 0:
             self.voicePanel.voiceCombo.setCurrentIndex(
                 voice_index
             )
 
-    def _save_selected_voice(self) -> None:
-        """Store the current valid voice selection."""
+        self.voicePanel.speedSlider.setValue(
+            self.settings_service.get_speed()
+        )
+        self.voicePanel.pitchSlider.setValue(
+            self.settings_service.get_pitch()
+        )
+        self.voicePanel.volumeSlider.setValue(
+            self.settings_service.get_volume()
+        )
+
+        output_folder = self.settings_service.get_output_folder()
+
+        self.outputPanel.folder.setText(str(output_folder))
+        self.outputPanel.filename.clear()
+
+    def _save_voice_preferences(self) -> None:
+        """Store the current narration preferences."""
 
         voice = self.voicePanel.voiceCombo.currentText().strip()
 
         if not self._is_valid_voice(voice):
             return
 
-        self.settings.setValue(
-            self.VOICE_SETTING_KEY,
-            voice,
+        language = (
+            self.voicePanel.languageFilter.currentData() or ""
         )
-        self.settings.sync()
+
+        self.settings_service.save_voice_settings(
+            language=str(language),
+            voice=voice,
+            speed=self.voicePanel.speedSlider.value(),
+            pitch=self.voicePanel.pitchSlider.value(),
+            volume=self.voicePanel.volumeSlider.value(),
+        )
 
     def _save_output_folder(self) -> None:
         """Store the current output folder."""
@@ -313,14 +244,12 @@ class MainWindow(QMainWindow):
         if not output_folder:
             return
 
-        self.settings.setValue(
-            self.OUTPUT_FOLDER_SETTING_KEY,
-            output_folder,
+        self.settings_service.set_output_folder(
+            output_folder
         )
-        self.settings.sync()
 
     def _connect_actions(self) -> None:
-        """Connect the essential narration controls."""
+        """Connect application controls."""
 
         self.outputPanel.browse.clicked.connect(
             self._select_output_folder
@@ -338,10 +267,185 @@ class MainWindow(QMainWindow):
         self.buttonBar.open.clicked.connect(
             self._open_output_folder
         )
-
-        self.voicePanel.voiceCombo.currentTextChanged.connect(
-            self._save_selected_voice
+        self.buttonBar.save.clicked.connect(
+            self._save_project
         )
+        self.buttonBar.load.clicked.connect(
+            self._load_project
+        )
+        self.buttonBar.clear.clicked.connect(
+            self._clear_project
+        )
+
+        self.voicePanel.languageFilter.currentIndexChanged.connect(
+            self._save_voice_preferences
+        )
+        self.voicePanel.voiceCombo.currentTextChanged.connect(
+            self._save_voice_preferences
+        )
+        self.voicePanel.speedSlider.valueChanged.connect(
+            self._save_voice_preferences
+        )
+        self.voicePanel.speedSlider.valueChanged.connect(
+            self._update_script_statistics
+        )
+        self.voicePanel.pitchSlider.valueChanged.connect(
+            self._save_voice_preferences
+        )
+        self.voicePanel.volumeSlider.valueChanged.connect(
+            self._save_voice_preferences
+        )
+        self.scriptEditor.editor.textChanged.connect(
+            self._update_script_statistics
+        )
+        self.scriptEditor.script_file_dropped.connect(
+            self._load_dropped_script_file
+        )
+
+    def _create_shortcuts(self) -> None:
+        """Create keyboard shortcuts for common actions."""
+
+        self.generateReturnShortcut = QShortcut(
+            QKeySequence("Ctrl+Return"),
+            self,
+        )
+        self.generateReturnShortcut.activated.connect(
+            self._generate_narration
+        )
+
+        self.generateEnterShortcut = QShortcut(
+            QKeySequence("Ctrl+Enter"),
+            self,
+        )
+        self.generateEnterShortcut.activated.connect(
+            self._generate_narration
+        )
+
+    def _get_preview_text(self) -> str:
+        """Return the first suitable sentence from the current script."""
+
+        text = self.scriptEditor.editor.toPlainText().strip()
+
+        if not text:
+            return ""
+
+        sentence_endings = (".", "!", "?")
+        sentence = text
+
+        for index, character in enumerate(text):
+            if character in sentence_endings:
+                sentence = text[: index + 1]
+                break
+
+        words = sentence.split()
+
+        if len(words) <= 30:
+            return sentence.strip()
+
+        return " ".join(words[:30])
+
+    def _update_script_statistics(self) -> None:
+        """Refresh live script statistics and duration estimate."""
+
+        self.scriptStatistics.update_statistics(
+            text=self.scriptEditor.editor.toPlainText(),
+            speed_adjustment=self.voicePanel.speedSlider.value(),
+        )
+
+    def _load_dropped_script_file(
+        self,
+        file_path: str,
+    ) -> None:
+        """Load a dropped .txt or .md file into the script editor."""
+
+        script_path = Path(file_path)
+
+        if not script_path.is_file():
+            QMessageBox.warning(
+                self,
+                "Script File Not Found",
+                (
+                    "The dropped script file could not be found.\n\n"
+                    f"{script_path}"
+                ),
+            )
+            return
+
+        if script_path.suffix.lower() not in {".txt", ".md"}:
+            QMessageBox.warning(
+                self,
+                "Unsupported Script File",
+                (
+                    "Scriptalator can currently load only .txt "
+                    "and .md files."
+                ),
+            )
+            return
+
+        current_script = (
+            self.scriptEditor.editor.toPlainText().strip()
+        )
+
+        if current_script:
+            response = QMessageBox.question(
+                self,
+                "Replace Current Script?",
+                (
+                    "The current script contains text.\n\n"
+                    "Replace it with:\n"
+                    f"{script_path.name}?"
+                ),
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+
+            if response != QMessageBox.StandardButton.Yes:
+                self.statusBarWidget.setText(
+                    "Dropped script was not loaded."
+                )
+                return
+
+        try:
+            script_text = script_path.read_text(
+                encoding="utf-8-sig"
+            )
+        except UnicodeDecodeError:
+            try:
+                script_text = script_path.read_text(
+                    encoding="cp1252"
+                )
+            except (OSError, UnicodeDecodeError) as error:
+                QMessageBox.critical(
+                    self,
+                    "Unable to Load Script",
+                    (
+                        "Scriptalator could not read the dropped file.\n\n"
+                        f"{error}"
+                    ),
+                )
+                return
+        except OSError as error:
+            QMessageBox.critical(
+                self,
+                "Unable to Load Script",
+                (
+                    "Scriptalator could not read the dropped file.\n\n"
+                    f"{error}"
+                ),
+            )
+            return
+
+        self.scriptEditor.editor.setPlainText(script_text)
+        self.current_project_path = None
+        self.last_generated_path = None
+        self._update_window_title()
+        self._update_script_statistics()
+
+        self.statusBarWidget.setText(
+            f"Loaded script: {script_path.name}"
+        )
+        self.scriptEditor.editor.setFocus()
 
     def _select_output_folder(self) -> None:
         """Allow the user to select the narration output folder."""
@@ -357,6 +461,265 @@ class MainWindow(QMainWindow):
         if selected_folder:
             self.outputPanel.folder.setText(selected_folder)
             self._save_output_folder()
+
+    def _get_projects_folder(self) -> Path | None:
+        """Create and return Scriptalator's project folder."""
+
+        projects_folder = self.project_root / "projects"
+
+        try:
+            projects_folder.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+        except OSError as error:
+            QMessageBox.critical(
+                self,
+                "Unable to Access Projects Folder",
+                (
+                    "Scriptalator could not create or access the "
+                    "projects folder.\n\n"
+                    f"{error}"
+                ),
+            )
+            return None
+
+        return projects_folder
+
+    def _save_project(self) -> None:
+        """Save the current narration workspace as a project."""
+
+        projects_folder = self._get_projects_folder()
+
+        if projects_folder is None:
+            return
+
+        suggested_name = (
+            self.current_project_path.name
+            if self.current_project_path is not None
+            else "untitled.scriptalator"
+        )
+
+        initial_path = projects_folder / suggested_name
+
+        selected_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Scriptalator Project",
+            str(initial_path),
+            (
+                "Scriptalator Projects "
+                f"(*{ProjectService.FILE_EXTENSION})"
+            ),
+        )
+
+        if not selected_path:
+            return
+
+        project_data = self._collect_project_data()
+
+        try:
+            saved_path = ProjectService.save_project(
+                Path(selected_path),
+                project_data,
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            QMessageBox.critical(
+                self,
+                "Unable to Save Project",
+                str(error),
+            )
+            return
+
+        self.current_project_path = saved_path
+        self._update_window_title()
+
+        self.statusBarWidget.setText(
+            f"Project saved: {saved_path}"
+        )
+
+        QMessageBox.information(
+            self,
+            "Project Saved",
+            (
+                "Scriptalator project saved successfully:\n\n"
+                f"{saved_path}"
+            ),
+        )
+
+    def _load_project(self) -> None:
+        """Load a Scriptalator project into the interface."""
+
+        projects_folder = self._get_projects_folder()
+
+        if projects_folder is None:
+            return
+
+        selected_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Scriptalator Project",
+            str(projects_folder),
+            (
+                "Scriptalator Projects "
+                f"(*{ProjectService.FILE_EXTENSION})"
+            ),
+        )
+
+        if not selected_path:
+            return
+
+        try:
+            project_data = ProjectService.load_project(
+                Path(selected_path)
+            )
+        except (
+            FileNotFoundError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as error:
+            QMessageBox.critical(
+                self,
+                "Unable to Load Project",
+                str(error),
+            )
+            return
+
+        self._apply_project_data(project_data)
+
+        self.current_project_path = Path(selected_path)
+        self.last_generated_path = None
+        self._update_window_title()
+
+        self._save_voice_preferences()
+        self._save_output_folder()
+
+        self.statusBarWidget.setText(
+            f"Project loaded: {selected_path}"
+        )
+
+        QMessageBox.information(
+            self,
+            "Project Loaded",
+            (
+                "Scriptalator project loaded successfully:\n\n"
+                f"{selected_path}"
+            ),
+        )
+
+    def _collect_project_data(self) -> dict[str, object]:
+        """Collect the current interface values for project saving."""
+
+        return {
+            "script": self.scriptEditor.editor.toPlainText(),
+            "language": (
+                self.voicePanel.languageFilter.currentData() or ""
+            ),
+            "voice": self.voicePanel.voiceCombo.currentText().strip(),
+            "speed": self.voicePanel.speedSlider.value(),
+            "pitch": self.voicePanel.pitchSlider.value(),
+            "volume": self.voicePanel.volumeSlider.value(),
+            "output_folder": (
+                self.outputPanel.folder.text().strip()
+            ),
+            "output_filename": (
+                self.outputPanel.filename.text().strip()
+            ),
+        }
+
+    def _apply_project_data(
+        self,
+        project_data: dict[str, object],
+    ) -> None:
+        """Restore project values into the interface."""
+
+        script = str(project_data["script"])
+        language = str(project_data["language"])
+        voice = str(project_data["voice"])
+        output_folder = str(project_data["output_folder"])
+        output_filename = str(project_data["output_filename"])
+
+        speed = int(project_data["speed"])
+        pitch = int(project_data["pitch"])
+        volume = int(project_data["volume"])
+
+        language_index = (
+            self.voicePanel.languageFilter.findData(language)
+        )
+
+        if language_index < 0:
+            language_index = 0
+
+        self.voicePanel.languageFilter.setCurrentIndex(
+            language_index
+        )
+
+        voice_index = self.voicePanel.voiceCombo.findText(voice)
+
+        if voice_index >= 0:
+            self.voicePanel.voiceCombo.setCurrentIndex(
+                voice_index
+            )
+
+        self.scriptEditor.editor.setPlainText(script)
+        self.voicePanel.speedSlider.setValue(speed)
+        self.voicePanel.pitchSlider.setValue(pitch)
+        self.voicePanel.volumeSlider.setValue(volume)
+        self.outputPanel.folder.setText(output_folder)
+        self.outputPanel.filename.setText(output_filename)
+
+        self.scriptEditor.editor.setFocus()
+
+    def _clear_project(self) -> None:
+        """Clear the current script and project-specific values."""
+
+        has_content = bool(
+            self.scriptEditor.editor.toPlainText().strip()
+            or self.outputPanel.filename.text().strip()
+        )
+
+        if has_content:
+            response = QMessageBox.question(
+                self,
+                "Clear Current Project?",
+                (
+                    "This will clear the current script and output "
+                    "filename.\n\n"
+                    "Unsaved project changes will be lost."
+                ),
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+
+            if response != QMessageBox.StandardButton.Yes:
+                return
+
+        self.scriptEditor.editor.clear()
+        self.outputPanel.filename.clear()
+
+        self.current_project_path = None
+        self.last_generated_path = None
+
+        self._update_window_title()
+        self.statusBarWidget.setText("Current project cleared.")
+        self.scriptEditor.editor.setFocus()
+
+    def _update_window_title(self) -> None:
+        """Display the current project name in the window title."""
+
+        if self.current_project_path is None:
+            self.setWindowTitle(
+                f"{APP_NAME} v{APP_VERSION}"
+            )
+            return
+
+        self.setWindowTitle(
+            (
+                f"{self.current_project_path.stem} — "
+                f"{APP_NAME} v{APP_VERSION}"
+            )
+        )
 
     def _generate_narration(self) -> None:
         """Start MP3 generation in a background thread."""
@@ -415,7 +778,7 @@ class MainWindow(QMainWindow):
             self.voicePanel.volumeSlider.value() - 100
         )
 
-        self._save_selected_voice()
+        self._save_voice_preferences()
         self._save_output_folder()
 
         self.generation_thread = NarrationGenerationThread(
@@ -505,9 +868,14 @@ class MainWindow(QMainWindow):
         """Enable or disable controls that affect generation."""
 
         self.buttonBar.generate.setEnabled(enabled)
+        self.buttonBar.save.setEnabled(enabled)
+        self.buttonBar.load.setEnabled(enabled)
+        self.buttonBar.clear.setEnabled(enabled)
+
         self.outputPanel.folder.setEnabled(enabled)
         self.outputPanel.filename.setEnabled(enabled)
         self.outputPanel.browse.setEnabled(enabled)
+
         self.voicePanel.languageFilter.setEnabled(enabled)
         self.voicePanel.voiceCombo.setEnabled(enabled)
         self.voicePanel.speedSlider.setEnabled(enabled)

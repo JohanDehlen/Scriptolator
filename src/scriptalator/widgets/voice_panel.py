@@ -1,5 +1,6 @@
 from pathlib import Path
 from tempfile import gettempdir
+from typing import Callable
 from uuid import uuid4
 
 from PySide6.QtCore import QThread, Qt, QUrl, Signal
@@ -16,6 +17,35 @@ from PySide6.QtWidgets import (
 )
 
 from services.edge_tts_service import EdgeTTSService
+from services.settings_service import SettingsService
+
+
+class VoiceComboBox(QComboBox):
+    """Display friendly voice labels while exposing Microsoft voice IDs."""
+
+    def currentText(self) -> str:
+        """Return the current Microsoft voice ID."""
+
+        voice_id = self.currentData()
+
+        if isinstance(voice_id, str) and voice_id:
+            return voice_id
+
+        return super().currentText()
+
+    def findText(
+        self,
+        text: str,
+        flags: Qt.MatchFlag = Qt.MatchFlag.MatchExactly
+        | Qt.MatchFlag.MatchCaseSensitive,
+    ) -> int:
+        """Find either a Microsoft voice ID or a visible label."""
+
+        for index in range(self.count()):
+            if self.itemData(index) == text:
+                return index
+
+        return super().findText(text, flags)
 
 
 class ResettableSlider(QSlider):
@@ -45,6 +75,7 @@ class VoicePreviewThread(QThread):
 
     def __init__(
         self,
+        preview_text: str,
         voice: str,
         output_path: Path,
         rate: str,
@@ -53,6 +84,7 @@ class VoicePreviewThread(QThread):
     ) -> None:
         super().__init__()
 
+        self.preview_text = preview_text
         self.voice = voice
         self.output_path = output_path
         self.rate = rate
@@ -62,14 +94,9 @@ class VoicePreviewThread(QThread):
     def run(self) -> None:
         """Generate the preview MP3 and report the result."""
 
-        preview_text = (
-            "In the beginning, God created the heavens and the earth. "
-            "This is a preview of the selected Scriptalator narration voice."
-        )
-
         try:
             generated_path = EdgeTTSService.generate_mp3(
-                text=preview_text,
+                text=self.preview_text,
                 voice=self.voice,
                 output_path=self.output_path,
                 rate=self.rate,
@@ -164,6 +191,128 @@ class VoicePanel(QWidget):
         "zu": "Zulu",
     }
 
+    REGION_NAMES = {
+        "AE": "United Arab Emirates",
+        "AR": "Argentina",
+        "AT": "Austria",
+        "AU": "Australia",
+        "BE": "Belgium",
+        "BO": "Bolivia",
+        "BR": "Brazil",
+        "CA": "Canada",
+        "CH": "Switzerland",
+        "CL": "Chile",
+        "CN": "China",
+        "CO": "Colombia",
+        "CR": "Costa Rica",
+        "CU": "Cuba",
+        "CZ": "Czech Republic",
+        "DE": "Germany",
+        "DK": "Denmark",
+        "DO": "Dominican Republic",
+        "DZ": "Algeria",
+        "EC": "Ecuador",
+        "EG": "Egypt",
+        "ES": "Spain",
+        "FI": "Finland",
+        "FR": "France",
+        "GB": "United Kingdom",
+        "GR": "Greece",
+        "GT": "Guatemala",
+        "HK": "Hong Kong",
+        "HN": "Honduras",
+        "IE": "Ireland",
+        "IL": "Israel",
+        "IN": "India",
+        "IQ": "Iraq",
+        "IT": "Italy",
+        "JO": "Jordan",
+        "JP": "Japan",
+        "KE": "Kenya",
+        "KR": "South Korea",
+        "KW": "Kuwait",
+        "LB": "Lebanon",
+        "LY": "Libya",
+        "MA": "Morocco",
+        "MX": "Mexico",
+        "MY": "Malaysia",
+        "NG": "Nigeria",
+        "NI": "Nicaragua",
+        "NL": "Netherlands",
+        "NO": "Norway",
+        "NZ": "New Zealand",
+        "OM": "Oman",
+        "PA": "Panama",
+        "PE": "Peru",
+        "PH": "Philippines",
+        "PK": "Pakistan",
+        "PL": "Poland",
+        "PR": "Puerto Rico",
+        "PT": "Portugal",
+        "PY": "Paraguay",
+        "QA": "Qatar",
+        "RO": "Romania",
+        "RU": "Russia",
+        "SA": "Saudi Arabia",
+        "SE": "Sweden",
+        "SG": "Singapore",
+        "SY": "Syria",
+        "TH": "Thailand",
+        "TN": "Tunisia",
+        "TR": "Turkey",
+        "TW": "Taiwan",
+        "TZ": "Tanzania",
+        "UA": "Ukraine",
+        "US": "United States",
+        "UY": "Uruguay",
+        "VE": "Venezuela",
+        "VN": "Vietnam",
+        "YE": "Yemen",
+        "ZA": "South Africa",
+    }
+
+    ENGLISH_LOCALE_NAMES = {
+        "en-US": "English (US)",
+        "en-GB": "English (UK)",
+        "en-AU": "English (Australia)",
+        "en-CA": "English (Canada)",
+        "en-IN": "English (India)",
+        "en-IE": "English (Ireland)",
+        "en-NZ": "English (New Zealand)",
+        "en-ZA": "English (South Africa)",
+        "en-SG": "English (Singapore)",
+        "en-HK": "English (Hong Kong)",
+        "en-KE": "English (Kenya)",
+        "en-NG": "English (Nigeria)",
+        "en-PH": "English (Philippines)",
+        "en-TZ": "English (Tanzania)",
+    }
+
+    PREFERRED_ENGLISH_LOCALES = (
+        "en-US",
+        "en-GB",
+        "en-AU",
+        "en-CA",
+        "en-IN",
+        "en-IE",
+        "en-NZ",
+        "en-ZA",
+        "en-SG",
+        "en-HK",
+        "en-KE",
+        "en-NG",
+        "en-PH",
+        "en-TZ",
+    )
+
+    CHINESE_LOCALE_NAMES = {
+        "zh-CN": "Chinese (Simplified)",
+        "zh-HK": "Chinese (Hong Kong)",
+        "zh-TW": "Chinese (Traditional)",
+    }
+
+    FAVORITES_FILTER_VALUE = "__favorites__"
+
     INVALID_VOICE_VALUES = {
         "Loading voices...",
         "No voices found",
@@ -173,13 +322,20 @@ class VoicePanel(QWidget):
     def __init__(self) -> None:
         super().__init__()
 
-        self.all_voices: list[str] = []
+        self.all_voices: list[dict[str, str]] = []
+        self.settings_service = SettingsService(
+            Path(__file__).resolve().parents[3]
+        )
+        self.favorite_voices = set(
+            self.settings_service.get_favorite_voices()
+        )
+        self.preview_text_provider: Callable[[], str] | None = None
         self.preview_thread: VoicePreviewThread | None = None
         self.last_preview_path: Path | None = None
 
         layout = QVBoxLayout(self)
 
-        layout.addWidget(QLabel("Select Language"))
+        layout.addWidget(QLabel("Narration Language"))
 
         self.languageFilter = QComboBox()
         self.languageFilter.addItem("Loading languages...")
@@ -187,13 +343,25 @@ class VoicePanel(QWidget):
 
         layout.addWidget(self.languageFilter)
 
-        layout.addWidget(QLabel("Voice"))
+        layout.addWidget(QLabel("Narration Voice"))
 
-        self.voiceCombo = QComboBox()
+        voice_selection_layout = QHBoxLayout()
+
+        self.favoriteButton = QPushButton("☆")
+        self.favoriteButton.setToolTip(
+            "Add the selected voice to Favorites"
+        )
+        self.favoriteButton.setFixedWidth(38)
+        self.favoriteButton.setEnabled(False)
+
+        self.voiceCombo = VoiceComboBox()
         self.voiceCombo.addItem("Loading voices...")
         self.voiceCombo.setEnabled(False)
 
-        layout.addWidget(self.voiceCombo)
+        voice_selection_layout.addWidget(self.favoriteButton)
+        voice_selection_layout.addWidget(self.voiceCombo, 1)
+
+        layout.addLayout(voice_selection_layout)
 
         layout.addWidget(QLabel("Speed"))
 
@@ -262,13 +430,19 @@ class VoicePanel(QWidget):
 
         layout.addWidget(reset_hint)
 
-        self.previewButton = QPushButton("Preview Voice")
+        self.previewButton = QPushButton("Preview")
         layout.addWidget(self.previewButton)
 
         layout.addStretch()
 
         self.languageFilter.currentIndexChanged.connect(
             self._apply_language_filter
+        )
+        self.voiceCombo.currentIndexChanged.connect(
+            self._update_favorite_button
+        )
+        self.favoriteButton.clicked.connect(
+            self._toggle_current_favorite
         )
         self.previewButton.clicked.connect(
             self._preview_voice
@@ -284,6 +458,33 @@ class VoicePanel(QWidget):
         )
 
         self.load_voices()
+
+    def set_preview_text_provider(
+        self,
+        provider: Callable[[], str],
+    ) -> None:
+        """Set the function used to obtain narration preview text."""
+
+        self.preview_text_provider = provider
+
+    def _get_preview_text(self) -> str:
+        """Return script-based preview text or a safe fallback."""
+
+        default_text = (
+            "In the beginning, God created the heavens and the earth."
+        )
+
+        if self.preview_text_provider is None:
+            return default_text
+
+        provided_text = self.preview_text_provider().strip()
+
+        if not provided_text:
+            return default_text
+
+        words = provided_text.split()
+
+        return " ".join(words[:25])
 
     @staticmethod
     def _create_centered_slider() -> ResettableSlider:
@@ -343,7 +544,7 @@ class VoicePanel(QWidget):
         self.voiceCombo.addItem("Loading voices...")
 
         try:
-            self.all_voices = EdgeTTSService.get_voices()
+            self.all_voices = EdgeTTSService.get_voice_details()
         except Exception as error:
             self.all_voices = []
 
@@ -368,23 +569,21 @@ class VoicePanel(QWidget):
         self._apply_language_filter()
 
     def _populate_languages(self) -> None:
-        """Populate the language dropdown from available voices."""
+        """Populate the dropdown with friendly locale names."""
 
-        language_codes = {
-            self._get_voice_language_code(voice)
+        locales = {
+            voice["locale"]
             for voice in self.all_voices
+            if voice["locale"]
         }
 
         language_entries = sorted(
             (
-                self.LANGUAGE_NAMES.get(
-                    language_code,
-                    language_code.upper(),
-                ),
-                language_code,
+                self._language_sort_key(locale),
+                self._friendly_locale_name(locale),
+                locale,
             )
-            for language_code in language_codes
-            if language_code
+            for locale in locales
         )
 
         self.languageFilter.blockSignals(True)
@@ -393,11 +592,15 @@ class VoicePanel(QWidget):
             "All Languages",
             "",
         )
+        self.languageFilter.addItem(
+            "★ Favorites",
+            self.FAVORITES_FILTER_VALUE,
+        )
 
-        for language_name, language_code in language_entries:
+        for _, language_name, locale in language_entries:
             self.languageFilter.addItem(
                 language_name,
-                language_code,
+                locale,
             )
 
         self.languageFilter.setCurrentIndex(0)
@@ -405,22 +608,34 @@ class VoicePanel(QWidget):
         self.languageFilter.blockSignals(False)
 
     def _apply_language_filter(self, _: int = -1) -> None:
-        """Show voices belonging to the selected language."""
+        """Show voices belonging to the selected locale."""
 
-        current_voice = self.voiceCombo.currentText().strip()
-        selected_language = (
+        current_voice_id = self.voiceCombo.currentText().strip()
+        selected_locale = (
             self.languageFilter.currentData() or ""
         )
 
-        if selected_language:
+        if selected_locale == self.FAVORITES_FILTER_VALUE:
             matching_voices = [
                 voice
                 for voice in self.all_voices
-                if self._get_voice_language_code(voice)
-                == selected_language
+                if voice["short_name"] in self.favorite_voices
+            ]
+        elif selected_locale:
+            matching_voices = [
+                voice
+                for voice in self.all_voices
+                if voice["locale"] == selected_locale
             ]
         else:
             matching_voices = self.all_voices.copy()
+
+        matching_voices.sort(
+            key=lambda voice: (
+                self._voice_display_name(voice).lower(),
+                voice["short_name"].lower(),
+            )
+        )
 
         self.voiceCombo.blockSignals(True)
         self.voiceCombo.clear()
@@ -428,24 +643,149 @@ class VoicePanel(QWidget):
         if not matching_voices:
             self.voiceCombo.addItem("No voices found")
             self.voiceCombo.setEnabled(False)
+            self.favoriteButton.setEnabled(False)
             self.voiceCombo.blockSignals(False)
+            self._update_favorite_button()
             return
 
-        self.voiceCombo.addItems(matching_voices)
-        self.voiceCombo.setEnabled(True)
+        for voice in matching_voices:
+            display_name = self._voice_display_name(voice)
 
-        current_index = self.voiceCombo.findText(current_voice)
+            if voice["short_name"] in self.favorite_voices:
+                display_name = f"★ {display_name}"
+
+            self.voiceCombo.addItem(
+                display_name,
+                voice["short_name"],
+            )
+
+        self.voiceCombo.setEnabled(True)
+        self.favoriteButton.setEnabled(True)
+
+        current_index = self.voiceCombo.findText(current_voice_id)
 
         if current_index >= 0:
             self.voiceCombo.setCurrentIndex(current_index)
 
         self.voiceCombo.blockSignals(False)
+        self._update_favorite_button()
+
+    def _toggle_current_favorite(self) -> None:
+        """Add or remove the selected voice from Favorites."""
+
+        voice_id = self.voiceCombo.currentText().strip()
+
+        if not self._is_valid_voice(voice_id):
+            return
+
+        is_favorite = self.settings_service.toggle_favorite_voice(
+            voice_id
+        )
+
+        if is_favorite:
+            self.favorite_voices.add(voice_id)
+        else:
+            self.favorite_voices.discard(voice_id)
+
+        self._apply_language_filter()
+        restored_index = self.voiceCombo.findText(voice_id)
+
+        if restored_index >= 0:
+            self.voiceCombo.setCurrentIndex(restored_index)
+
+        self._update_favorite_button()
+
+    def _update_favorite_button(self, _: int = -1) -> None:
+        """Reflect the selected voice's favorite state."""
+
+        voice_id = self.voiceCombo.currentText().strip()
+        is_valid = self._is_valid_voice(voice_id)
+
+        self.favoriteButton.setEnabled(is_valid)
+
+        if is_valid and voice_id in self.favorite_voices:
+            self.favoriteButton.setText("★")
+            self.favoriteButton.setToolTip(
+                "Remove the selected voice from Favorites"
+            )
+            return
+
+        self.favoriteButton.setText("☆")
+        self.favoriteButton.setToolTip(
+            "Add the selected voice to Favorites"
+        )
+
+    @classmethod
+    def _language_sort_key(
+        cls,
+        locale: str,
+    ) -> tuple[int, int, str]:
+        """Place English variants first, then other languages alphabetically."""
+
+        if locale in cls.PREFERRED_ENGLISH_LOCALES:
+            return (
+                0,
+                cls.PREFERRED_ENGLISH_LOCALES.index(locale),
+                "",
+            )
+
+        return (
+            1,
+            0,
+            cls._friendly_locale_name(locale).lower(),
+        )
+
+    @classmethod
+    def _friendly_locale_name(cls, locale: str) -> str:
+        """Convert a Microsoft locale code into a readable name."""
+
+        if locale in cls.ENGLISH_LOCALE_NAMES:
+            return cls.ENGLISH_LOCALE_NAMES[locale]
+
+        if locale in cls.CHINESE_LOCALE_NAMES:
+            return cls.CHINESE_LOCALE_NAMES[locale]
+
+        language_code, separator, region_code = locale.partition("-")
+
+        language_name = cls.LANGUAGE_NAMES.get(
+            language_code.lower(),
+            language_code.upper(),
+        )
+
+        if not separator:
+            return language_name
+
+        region_name = cls.REGION_NAMES.get(
+            region_code.upper(),
+            region_code.upper(),
+        )
+
+        return f"{language_name} ({region_name})"
 
     @staticmethod
-    def _get_voice_language_code(voice: str) -> str:
-        """Return the language code at the start of a voice name."""
+    def _simple_voice_name(short_name: str) -> str:
+        """Extract the speaker name from a Microsoft voice ID."""
 
-        return voice.split("-", 1)[0].lower()
+        name = short_name.rsplit("-", 1)[-1]
+
+        if name.lower().endswith("neural"):
+            name = name[:-6]
+
+        return name or short_name
+
+    @classmethod
+    def _voice_display_name(
+        cls,
+        voice: dict[str, str],
+    ) -> str:
+        """Return the friendly label shown in the voice dropdown."""
+
+        speaker_name = cls._simple_voice_name(
+            voice["short_name"]
+        )
+        gender = voice["gender"].strip() or "Unknown"
+
+        return f"{speaker_name} — {gender}"
 
     def _preview_voice(self) -> None:
         """Generate and play a preview of the selected voice."""
@@ -477,6 +817,7 @@ class VoicePanel(QWidget):
         )
 
         self.preview_thread = VoicePreviewThread(
+            preview_text=self._get_preview_text(),
             voice=voice,
             output_path=preview_path,
             rate=self._format_percentage(
@@ -504,7 +845,7 @@ class VoicePanel(QWidget):
         )
 
         self._set_preview_controls_enabled(False)
-        self.previewButton.setText("Generating Preview...")
+        self.previewButton.setText("Generating...")
 
         self.preview_thread.start()
 
@@ -545,7 +886,7 @@ class VoicePanel(QWidget):
         """Restore the preview controls after generation."""
 
         self._set_preview_controls_enabled(True)
-        self.previewButton.setText("Preview Voice")
+        self.previewButton.setText("Preview")
         self.preview_thread = None
 
     def _set_preview_controls_enabled(
@@ -556,6 +897,11 @@ class VoicePanel(QWidget):
 
         self.languageFilter.setEnabled(enabled)
         self.voiceCombo.setEnabled(enabled)
+        self.favoriteButton.setEnabled(
+            enabled and self._is_valid_voice(
+                self.voiceCombo.currentText().strip()
+            )
+        )
         self.speedSlider.setEnabled(enabled)
         self.pitchSlider.setEnabled(enabled)
         self.volumeSlider.setEnabled(enabled)

@@ -1,0 +1,14 @@
+{
+    "format": "Scriptalator Project",
+    "format_version": 1,
+    "project": {
+        "script": "You can ask for a strength that isn't your own—a strength that is perfect and never runs out.",
+        "language": "en",
+        "voice": "en-IN-NeerjaNeural",
+        "speed": 0,
+        "pitch": 0,
+        "volume": 100,
+        "output_folder": "C:\\Projects\\Scriptalator\\output",
+        "output_filename": ""
+    }
+}

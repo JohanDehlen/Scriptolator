@@ -1,6 +1,6 @@
 import asyncio
 from pathlib import Path
-from typing import List
+from typing import Any
 
 import edge_tts
 
@@ -9,21 +9,89 @@ class EdgeTTSService:
     """Provide Microsoft Edge voice discovery and speech synthesis."""
 
     @staticmethod
-    def get_voices() -> List[str]:
+    def get_voices() -> list[str]:
         """Return the available Microsoft Edge voice short names."""
 
-        return asyncio.run(EdgeTTSService._load_voices())
+        return [
+            voice["short_name"]
+            for voice in EdgeTTSService.get_voice_details()
+        ]
 
     @staticmethod
-    async def _load_voices() -> List[str]:
-        """Retrieve voice information from Microsoft Edge TTS."""
+    def get_voice_details() -> list[dict[str, str]]:
+        """Return normalized metadata for available Microsoft Edge voices."""
+
+        return asyncio.run(
+            EdgeTTSService._load_voice_details()
+        )
+
+    @staticmethod
+    async def _load_voice_details() -> list[dict[str, str]]:
+        """Retrieve and normalize voice metadata from Microsoft Edge TTS."""
 
         manager = await edge_tts.VoicesManager.create()
 
-        return sorted(
-            voice["ShortName"]
+        voice_details = [
+            EdgeTTSService._normalize_voice_metadata(voice)
             for voice in manager.voices
+        ]
+
+        return sorted(
+            voice_details,
+            key=lambda voice: (
+                voice["locale"].lower(),
+                voice["friendly_name"].lower(),
+                voice["short_name"].lower(),
+            ),
         )
+
+    @staticmethod
+    def _normalize_voice_metadata(
+        voice: dict[str, Any],
+    ) -> dict[str, str]:
+        """Convert Microsoft voice metadata into a stable structure."""
+
+        short_name = str(
+            voice.get("ShortName", "")
+        ).strip()
+
+        locale = str(
+            voice.get("Locale", "")
+        ).strip()
+
+        gender = str(
+            voice.get("Gender", "")
+        ).strip()
+
+        friendly_name = str(
+            voice.get("FriendlyName", "")
+        ).strip()
+
+        if not friendly_name:
+            friendly_name = EdgeTTSService._name_from_short_name(
+                short_name
+            )
+
+        return {
+            "short_name": short_name,
+            "locale": locale,
+            "gender": gender,
+            "friendly_name": friendly_name,
+        }
+
+    @staticmethod
+    def _name_from_short_name(short_name: str) -> str:
+        """Derive a readable voice name from a Microsoft short name."""
+
+        if not short_name:
+            return "Unknown Voice"
+
+        name_part = short_name.rsplit("-", 1)[-1]
+
+        if name_part.lower().endswith("neural"):
+            name_part = name_part[:-6]
+
+        return name_part or short_name
 
     @staticmethod
     def generate_mp3(
@@ -65,9 +133,14 @@ class EdgeTTSService:
         destination = Path(output_path).expanduser()
 
         if destination.suffix.lower() != ".mp3":
-            raise ValueError("The output filename must end with .mp3.")
+            raise ValueError(
+                "The output filename must end with .mp3."
+            )
 
-        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
         asyncio.run(
             EdgeTTSService._generate_mp3(
@@ -80,7 +153,10 @@ class EdgeTTSService:
             )
         )
 
-        if not destination.is_file() or destination.stat().st_size == 0:
+        if (
+            not destination.is_file()
+            or destination.stat().st_size == 0
+        ):
             raise RuntimeError(
                 "Narration generation completed without producing audio."
             )
