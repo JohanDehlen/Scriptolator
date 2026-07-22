@@ -239,7 +239,18 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.openProjectAction)
         file_menu.addAction(self.saveProjectAction)
         file_menu.addSeparator()
+
+        self.recentProjectsMenu = file_menu.addMenu(
+            "Recent Projects"
+        )
+        self.recentProjectsMenu.aboutToShow.connect(
+            self._refresh_recent_projects_menu
+        )
+
+        file_menu.addSeparator()
         file_menu.addAction(self.exitAction)
+
+        self._refresh_recent_projects_menu()
 
         edit_menu = self.menuBar().addMenu("&Edit")
 
@@ -335,6 +346,66 @@ class MainWindow(QMainWindow):
         )
 
         help_menu.addAction(self.aboutAction)
+
+    def _refresh_recent_projects_menu(self) -> None:
+        """Rebuild the Recent Projects submenu."""
+
+        self.recentProjectsMenu.clear()
+
+        recent_projects = (
+            self.settings_service.get_recent_projects()
+        )
+
+        if not recent_projects:
+            empty_action = self.recentProjectsMenu.addAction(
+                "No Recent Projects"
+            )
+            empty_action.setEnabled(False)
+            return
+
+        stem_counts: dict[str, int] = {}
+
+        for project_path in recent_projects:
+            stem_key = project_path.stem.casefold()
+            stem_counts[stem_key] = (
+                stem_counts.get(stem_key, 0) + 1
+            )
+
+        for project_path in recent_projects:
+            display_name = project_path.stem
+
+            if stem_counts[project_path.stem.casefold()] > 1:
+                display_name = (
+                    f"{display_name} — {project_path.parent}"
+                )
+
+            project_action = self.recentProjectsMenu.addAction(
+                display_name
+            )
+            project_action.setToolTip(str(project_path))
+            project_action.triggered.connect(
+                lambda checked=False, path=project_path: (
+                    self._load_project_path(path)
+                )
+            )
+
+        self.recentProjectsMenu.addSeparator()
+
+        clear_action = self.recentProjectsMenu.addAction(
+            "Clear Recent Projects"
+        )
+        clear_action.triggered.connect(
+            self._clear_recent_projects
+        )
+
+    def _clear_recent_projects(self) -> None:
+        """Clear the Recent Projects list."""
+
+        self.settings_service.clear_recent_projects()
+        self._refresh_recent_projects_menu()
+        self.statusBarWidget.setText(
+            "Recent projects cleared."
+        )
 
     def _show_about_dialog(self) -> None:
         """Show current application and system information."""
@@ -1103,6 +1174,8 @@ class MainWindow(QMainWindow):
             return
 
         self.current_project_path = saved_path
+        self.settings_service.add_recent_project(saved_path)
+        self._refresh_recent_projects_menu()
         self._update_window_title()
 
         self.statusBarWidget.setText(
@@ -1119,7 +1192,7 @@ class MainWindow(QMainWindow):
         )
 
     def _load_project(self) -> None:
-        """Load a Scriptalator project into the interface."""
+        """Choose and load a Scriptalator project."""
 
         projects_folder = self._get_projects_folder()
 
@@ -1139,9 +1212,36 @@ class MainWindow(QMainWindow):
         if not selected_path:
             return
 
+        self._load_project_path(Path(selected_path))
+
+    def _load_project_path(
+        self,
+        project_path: Path,
+    ) -> None:
+        """Load a project from a known file path."""
+
+        normalized_path = Path(project_path).expanduser()
+
+        if not normalized_path.is_file():
+            self.settings_service.remove_recent_project(
+                normalized_path
+            )
+            self._refresh_recent_projects_menu()
+
+            QMessageBox.warning(
+                self,
+                "Project Not Found",
+                (
+                    "The project file could not be found and was "
+                    "removed from Recent Projects.\n\n"
+                    f"{normalized_path}"
+                ),
+            )
+            return
+
         try:
             project_data = ProjectService.load_project(
-                Path(selected_path)
+                normalized_path
             )
         except (
             FileNotFoundError,
@@ -1159,15 +1259,20 @@ class MainWindow(QMainWindow):
 
         self._apply_project_data(project_data)
 
-        self.current_project_path = Path(selected_path)
+        self.current_project_path = normalized_path.resolve()
         self.last_generated_path = None
+
+        self.settings_service.add_recent_project(
+            self.current_project_path
+        )
+        self._refresh_recent_projects_menu()
         self._update_window_title()
 
         self._save_voice_preferences()
         self._save_output_folder()
 
         self.statusBarWidget.setText(
-            f"Project loaded: {selected_path}"
+            f"Project loaded: {self.current_project_path}"
         )
 
         QMessageBox.information(
@@ -1175,7 +1280,7 @@ class MainWindow(QMainWindow):
             "Project Loaded",
             (
                 "Scriptalator project loaded successfully:\n\n"
-                f"{selected_path}"
+                f"{self.current_project_path}"
             ),
         )
 

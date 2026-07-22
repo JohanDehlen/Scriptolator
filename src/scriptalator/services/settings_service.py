@@ -17,6 +17,7 @@ class SettingsService:
     VOLUME_KEY = "narration/volume"
     FAVORITE_VOICES_KEY = "narration/favorite_voices"
     LAST_PROFILE_KEY = "narration/last_profile"
+    RECENT_PROJECTS_KEY = "projects/recent"
     OUTPUT_FOLDER_KEY = "output/last_folder"
 
     LEGACY_OUTPUT_FILENAME_KEY = "output/last_filename"
@@ -30,6 +31,7 @@ class SettingsService:
     DEFAULT_PITCH = 0
     DEFAULT_VOLUME = 100
     DEFAULT_PROFILE = ""
+    MAX_RECENT_PROJECTS = 10
 
     def __init__(self, project_root: Path) -> None:
         self.project_root = Path(project_root)
@@ -105,6 +107,129 @@ class SettingsService:
         """Clear the saved last-profile selection."""
 
         self.settings.remove(self.LAST_PROFILE_KEY)
+        self.settings.sync()
+
+    def get_recent_projects(self) -> list[Path]:
+        """Return existing recent project files, newest first."""
+
+        saved_value = self.settings.value(
+            self.RECENT_PROJECTS_KEY,
+            [],
+        )
+
+        if isinstance(saved_value, str):
+            saved_paths = [saved_value]
+        elif isinstance(saved_value, (list, tuple)):
+            saved_paths = list(saved_value)
+        else:
+            saved_paths = []
+
+        recent_projects: list[Path] = []
+        seen_paths: set[str] = set()
+
+        for saved_path in saved_paths:
+            path_text = str(saved_path).strip()
+
+            if not path_text:
+                continue
+
+            project_path = Path(path_text).expanduser()
+            normalized_key = str(project_path).casefold()
+
+            if normalized_key in seen_paths:
+                continue
+
+            if not project_path.is_file():
+                continue
+
+            seen_paths.add(normalized_key)
+            recent_projects.append(project_path)
+
+            if len(recent_projects) >= self.MAX_RECENT_PROJECTS:
+                break
+
+        self.set_recent_projects(recent_projects)
+
+        return recent_projects
+
+    def set_recent_projects(
+        self,
+        project_paths: list[Path | str],
+    ) -> None:
+        """Store the complete recent-project list."""
+
+        normalized_paths: list[str] = []
+        seen_paths: set[str] = set()
+
+        for project_path in project_paths:
+            path_text = str(
+                Path(project_path).expanduser()
+            ).strip()
+
+            if not path_text:
+                continue
+
+            normalized_key = path_text.casefold()
+
+            if normalized_key in seen_paths:
+                continue
+
+            seen_paths.add(normalized_key)
+            normalized_paths.append(path_text)
+
+            if len(normalized_paths) >= self.MAX_RECENT_PROJECTS:
+                break
+
+        self.settings.setValue(
+            self.RECENT_PROJECTS_KEY,
+            normalized_paths,
+        )
+        self.settings.sync()
+
+    def add_recent_project(
+        self,
+        project_path: Path | str,
+    ) -> None:
+        """Move a project to the top of the recent-project list."""
+
+        normalized_path = Path(project_path).expanduser()
+
+        if not normalized_path.is_file():
+            return
+
+        recent_projects = [
+            path
+            for path in self.get_recent_projects()
+            if str(path).casefold()
+            != str(normalized_path).casefold()
+        ]
+
+        recent_projects.insert(0, normalized_path)
+
+        self.set_recent_projects(recent_projects)
+
+    def remove_recent_project(
+        self,
+        project_path: Path | str,
+    ) -> None:
+        """Remove one project from the recent-project list."""
+
+        normalized_key = str(
+            Path(project_path).expanduser()
+        ).casefold()
+
+        recent_projects = [
+            path
+            for path in self.get_recent_projects()
+            if str(path).casefold() != normalized_key
+        ]
+
+        self.set_recent_projects(recent_projects)
+
+    def clear_recent_projects(self) -> None:
+        """Clear all recent-project entries."""
+
+        self.settings.remove(self.RECENT_PROJECTS_KEY)
         self.settings.sync()
 
     def get_favorite_voices(self) -> list[str]:
