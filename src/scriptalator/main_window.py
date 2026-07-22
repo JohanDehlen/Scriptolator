@@ -98,7 +98,6 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.resize(1280, 850)
-        self._create_menus()
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -177,6 +176,7 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(self.statusBarWidget)
 
+        self._create_menus()
         self._restore_application_settings()
         self._initialize_profiles()
         self.voicePanel.set_preview_text_provider(
@@ -190,6 +190,139 @@ class MainWindow(QMainWindow):
 
     def _create_menus(self) -> None:
         """Create the application menu bar."""
+
+        file_menu = self.menuBar().addMenu("&File")
+
+        self.newProjectAction = QAction(
+            "&New Project",
+            self,
+        )
+        self.newProjectAction.setShortcut(
+            QKeySequence.StandardKey.New
+        )
+        self.newProjectAction.triggered.connect(
+            self._clear_project
+        )
+
+        self.openProjectAction = QAction(
+            "&Open Project...",
+            self,
+        )
+        self.openProjectAction.setShortcut(
+            QKeySequence.StandardKey.Open
+        )
+        self.openProjectAction.triggered.connect(
+            self._load_project
+        )
+
+        self.saveProjectAction = QAction(
+            "&Save Project...",
+            self,
+        )
+        self.saveProjectAction.setShortcut(
+            QKeySequence.StandardKey.Save
+        )
+        self.saveProjectAction.triggered.connect(
+            self._save_project
+        )
+
+        self.exitAction = QAction(
+            "E&xit",
+            self,
+        )
+        self.exitAction.setShortcut(
+            QKeySequence.StandardKey.Quit
+        )
+        self.exitAction.triggered.connect(self.close)
+
+        file_menu.addAction(self.newProjectAction)
+        file_menu.addAction(self.openProjectAction)
+        file_menu.addAction(self.saveProjectAction)
+        file_menu.addSeparator()
+        file_menu.addAction(self.exitAction)
+
+        edit_menu = self.menuBar().addMenu("&Edit")
+
+        self.undoAction = QAction("&Undo", self)
+        self.undoAction.setShortcut(
+            QKeySequence.StandardKey.Undo
+        )
+        self.undoAction.triggered.connect(
+            self.scriptEditor.editor.undo
+        )
+
+        self.redoAction = QAction("&Redo", self)
+        self.redoAction.setShortcut(
+            QKeySequence.StandardKey.Redo
+        )
+        self.redoAction.triggered.connect(
+            self.scriptEditor.editor.redo
+        )
+
+        self.cutAction = QAction("Cu&t", self)
+        self.cutAction.setShortcut(
+            QKeySequence.StandardKey.Cut
+        )
+        self.cutAction.triggered.connect(
+            self.scriptEditor.editor.cut
+        )
+
+        self.copyAction = QAction("&Copy", self)
+        self.copyAction.setShortcut(
+            QKeySequence.StandardKey.Copy
+        )
+        self.copyAction.triggered.connect(
+            self.scriptEditor.editor.copy
+        )
+
+        self.pasteAction = QAction("&Paste", self)
+        self.pasteAction.setShortcut(
+            QKeySequence.StandardKey.Paste
+        )
+        self.pasteAction.triggered.connect(
+            self.scriptEditor.editor.paste
+        )
+
+        self.selectAllAction = QAction(
+            "Select &All",
+            self,
+        )
+        self.selectAllAction.setShortcut(
+            QKeySequence.StandardKey.SelectAll
+        )
+        self.selectAllAction.triggered.connect(
+            self.scriptEditor.editor.selectAll
+        )
+
+        edit_menu.addAction(self.undoAction)
+        edit_menu.addAction(self.redoAction)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.cutAction)
+        edit_menu.addAction(self.copyAction)
+        edit_menu.addAction(self.pasteAction)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.selectAllAction)
+
+        tools_menu = self.menuBar().addMenu("&Tools")
+
+        self.openOutputFolderAction = QAction(
+            "Open &Output Folder",
+            self,
+        )
+        self.openOutputFolderAction.triggered.connect(
+            self._open_output_folder
+        )
+
+        self.openProfilesFolderAction = QAction(
+            "Open &Profiles Folder",
+            self,
+        )
+        self.openProfilesFolderAction.triggered.connect(
+            self._open_profiles_folder
+        )
+
+        tools_menu.addAction(self.openOutputFolderAction)
+        tools_menu.addAction(self.openProfilesFolderAction)
 
         help_menu = self.menuBar().addMenu("&Help")
 
@@ -1310,6 +1443,10 @@ class MainWindow(QMainWindow):
         self.buttonBar.save.setEnabled(enabled)
         self.buttonBar.load.setEnabled(enabled)
         self.buttonBar.clear.setEnabled(enabled)
+
+        self.newProjectAction.setEnabled(enabled)
+        self.openProjectAction.setEnabled(enabled)
+        self.saveProjectAction.setEnabled(enabled)
 
         self.outputPanel.folder.setEnabled(enabled)
         self.outputPanel.filename.setEnabled(enabled)
