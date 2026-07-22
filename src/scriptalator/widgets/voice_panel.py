@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from services.edge_tts_service import EdgeTTSService
 from services.settings_service import SettingsService
+from widgets.profile_controls import ProfileControls
 
 
 class VoiceComboBox(QComboBox):
@@ -334,6 +335,9 @@ class VoicePanel(QWidget):
         self.last_preview_path: Path | None = None
 
         layout = QVBoxLayout(self)
+
+        self.profileControls = ProfileControls()
+        layout.addWidget(self.profileControls)
 
         layout.addWidget(QLabel("Narration Language"))
 
