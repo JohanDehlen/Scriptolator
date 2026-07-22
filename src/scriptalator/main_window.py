@@ -2,6 +2,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, QUrl, Signal
 from PySide6.QtGui import (
+    QAction,
     QCloseEvent,
     QDesktopServices,
     QKeySequence,
@@ -24,6 +25,7 @@ from services.profile_service import ProfileService
 from services.project_service import ProjectService
 from services.settings_service import SettingsService
 from version import APP_NAME, APP_VERSION
+from widgets.about_dialog import AboutDialog
 from widgets.button_bar import ButtonBar
 from widgets.output_panel import OutputPanel
 from widgets.script_editor import ScriptEditor
@@ -96,6 +98,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.resize(1280, 850)
+        self._create_menus()
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -184,6 +187,41 @@ class MainWindow(QMainWindow):
         self._update_script_statistics()
 
         self.scriptEditor.editor.setFocus()
+
+    def _create_menus(self) -> None:
+        """Create the application menu bar."""
+
+        help_menu = self.menuBar().addMenu("&Help")
+
+        self.aboutAction = QAction(
+            f"About {APP_NAME}...",
+            self,
+        )
+        self.aboutAction.triggered.connect(
+            self._show_about_dialog
+        )
+
+        help_menu.addAction(self.aboutAction)
+
+    def _show_about_dialog(self) -> None:
+        """Show current application and system information."""
+
+        profile_name = (
+            self.voicePanel.profileControls.current_profile_name()
+        )
+
+        project_name = ""
+
+        if self.current_project_path is not None:
+            project_name = self.current_project_path.stem
+
+        dialog = AboutDialog(
+            parent=self,
+            current_profile=profile_name,
+            current_project=project_name,
+            voice_count=len(self.voicePanel.all_voices),
+        )
+        dialog.exec()
 
     def _restore_application_settings(self) -> None:
         """Restore saved narration and output preferences."""
