@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QByteArray, QSettings
 
 
 class SettingsService:
@@ -19,6 +19,8 @@ class SettingsService:
     LAST_PROFILE_KEY = "narration/last_profile"
     RECENT_PROJECTS_KEY = "projects/recent"
     OUTPUT_FOLDER_KEY = "output/last_folder"
+    WINDOW_GEOMETRY_KEY = "window/geometry"
+    WINDOW_STATE_KEY = "window/state"
 
     LEGACY_OUTPUT_FILENAME_KEY = "output/last_filename"
     MIGRATION_COMPLETE_KEY = (
@@ -43,6 +45,73 @@ class SettingsService:
 
         self._migrate_previous_settings()
         self._remove_legacy_filename_setting()
+
+    def get_window_geometry(self) -> QByteArray:
+        """Return the saved main-window geometry."""
+
+        saved_geometry = self.settings.value(
+            self.WINDOW_GEOMETRY_KEY,
+            QByteArray(),
+        )
+
+        if isinstance(saved_geometry, QByteArray):
+            return saved_geometry
+
+        return QByteArray()
+
+    def set_window_geometry(
+        self,
+        geometry: QByteArray,
+    ) -> None:
+        """Store the main-window size, position, and display state."""
+
+        if not isinstance(geometry, QByteArray):
+            raise TypeError(
+                "Window geometry must be a QByteArray."
+            )
+
+        self.settings.setValue(
+            self.WINDOW_GEOMETRY_KEY,
+            geometry,
+        )
+        self.settings.sync()
+
+    def get_window_state(self) -> QByteArray:
+        """Return the saved QMainWindow state."""
+
+        saved_state = self.settings.value(
+            self.WINDOW_STATE_KEY,
+            QByteArray(),
+        )
+
+        if isinstance(saved_state, QByteArray):
+            return saved_state
+
+        return QByteArray()
+
+    def set_window_state(
+        self,
+        window_state: QByteArray,
+    ) -> None:
+        """Store the QMainWindow toolbar and dock state."""
+
+        if not isinstance(window_state, QByteArray):
+            raise TypeError(
+                "Window state must be a QByteArray."
+            )
+
+        self.settings.setValue(
+            self.WINDOW_STATE_KEY,
+            window_state,
+        )
+        self.settings.sync()
+
+    def clear_window_state(self) -> None:
+        """Clear saved main-window geometry and state."""
+
+        self.settings.remove(self.WINDOW_GEOMETRY_KEY)
+        self.settings.remove(self.WINDOW_STATE_KEY)
+        self.settings.sync()
 
     def get_language(self) -> str:
         """Return the last selected language code."""

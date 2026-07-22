@@ -96,7 +96,7 @@ class MainWindow(QMainWindow):
         self._applying_profile = False
         self._loaded_profile_data: dict[str, object] | None = None
 
-        self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
+        self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.resize(1280, 850)
 
         central = QWidget()
@@ -185,8 +185,34 @@ class MainWindow(QMainWindow):
         self._connect_actions()
         self._create_shortcuts()
         self._update_script_statistics()
+        self._update_window_title()
+        self._restore_window_state()
 
         self.scriptEditor.editor.setFocus()
+
+    def _restore_window_state(self) -> None:
+        """Restore the saved window size, position, and state."""
+
+        saved_geometry = (
+            self.settings_service.get_window_geometry()
+        )
+        saved_state = self.settings_service.get_window_state()
+
+        if not saved_geometry.isEmpty():
+            self.restoreGeometry(saved_geometry)
+
+        if not saved_state.isEmpty():
+            self.restoreState(saved_state)
+
+    def _save_window_state(self) -> None:
+        """Save the current window size, position, and state."""
+
+        self.settings_service.set_window_geometry(
+            self.saveGeometry()
+        )
+        self.settings_service.set_window_state(
+            self.saveState()
+        )
 
     def _create_menus(self) -> None:
         """Create the application menu bar."""
@@ -1383,19 +1409,18 @@ class MainWindow(QMainWindow):
         self.scriptEditor.editor.setFocus()
 
     def _update_window_title(self) -> None:
-        """Display the current project name in the window title."""
+        """Display the active project and application version."""
+
+        application_title = f"{APP_NAME} {APP_VERSION}"
 
         if self.current_project_path is None:
-            self.setWindowTitle(
-                f"{APP_NAME} v{APP_VERSION}"
-            )
+            self.setWindowTitle(application_title)
             return
 
+        project_name = self.current_project_path.stem
+
         self.setWindowTitle(
-            (
-                f"{self.current_project_path.stem} — "
-                f"{APP_NAME} v{APP_VERSION}"
-            )
+            f"{project_name} — {application_title}"
         )
 
     def _generate_narration(self) -> None:
@@ -1712,6 +1737,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
 
+        self._save_window_state()
         event.accept()
 
     @staticmethod
