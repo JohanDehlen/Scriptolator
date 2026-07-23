@@ -31,6 +31,7 @@ from services.settings_service import SettingsService
 from version import APP_NAME, APP_VERSION
 from widgets.about_dialog import AboutDialog
 from widgets.button_bar import ButtonBar
+from widgets.help_viewer import HelpViewerDialog
 from widgets.output_panel import OutputPanel
 from widgets.preferences_dialog import (
     GeneralPreferences,
@@ -528,6 +529,75 @@ class MainWindow(QMainWindow):
 
         help_menu = self.menuBar().addMenu("&Help")
 
+        self.quickStartAction = QAction(
+            "Quick Start Guide",
+            self,
+        )
+        self.quickStartAction.setShortcut(
+            QKeySequence("F1")
+        )
+        self.quickStartAction.triggered.connect(
+            lambda: self._show_help_document(
+                "Quick Start Guide",
+                "QuickStart.md",
+            )
+        )
+
+        self.userGuideAction = QAction(
+            "User Guide",
+            self,
+        )
+        self.userGuideAction.triggered.connect(
+            lambda: self._show_help_document(
+                "User Guide",
+                "UserGuide.md",
+            )
+        )
+
+        self.keyboardShortcutsAction = QAction(
+            "Keyboard Shortcuts",
+            self,
+        )
+        self.keyboardShortcutsAction.triggered.connect(
+            lambda: self._show_help_document(
+                "Keyboard Shortcuts",
+                "KeyboardShortcuts.md",
+            )
+        )
+
+        self.faqAction = QAction(
+            "Frequently Asked Questions",
+            self,
+        )
+        self.faqAction.triggered.connect(
+            lambda: self._show_help_document(
+                "Frequently Asked Questions",
+                "FAQ.md",
+            )
+        )
+
+        self.troubleshootingAction = QAction(
+            "Troubleshooting",
+            self,
+        )
+        self.troubleshootingAction.triggered.connect(
+            lambda: self._show_help_document(
+                "Troubleshooting",
+                "Troubleshooting.md",
+            )
+        )
+
+        self.releaseNotesAction = QAction(
+            "Release Notes",
+            self,
+        )
+        self.releaseNotesAction.triggered.connect(
+            lambda: self._show_help_document(
+                "Release Notes",
+                "ReleaseNotes.md",
+            )
+        )
+
         self.aboutAction = QAction(
             f"About {APP_NAME}...",
             self,
@@ -536,6 +606,15 @@ class MainWindow(QMainWindow):
             self._show_about_dialog
         )
 
+        help_menu.addAction(self.quickStartAction)
+        help_menu.addAction(self.userGuideAction)
+        help_menu.addAction(self.keyboardShortcutsAction)
+        help_menu.addSeparator()
+        help_menu.addAction(self.faqAction)
+        help_menu.addAction(self.troubleshootingAction)
+        help_menu.addSeparator()
+        help_menu.addAction(self.releaseNotesAction)
+        help_menu.addSeparator()
         help_menu.addAction(self.aboutAction)
 
     def _refresh_recent_projects_menu(self) -> None:
@@ -630,6 +709,20 @@ class MainWindow(QMainWindow):
         self.statusBarWidget.setText(
             "Preferences saved successfully."
         )
+
+    def _show_help_document(
+        self,
+        title: str,
+        document_name: str,
+    ) -> None:
+        """Open one bundled Markdown help document."""
+
+        dialog = HelpViewerDialog(
+            title=title,
+            document_name=document_name,
+            parent=self,
+        )
+        dialog.exec()
 
     def _show_about_dialog(self) -> None:
         """Show current application and system information."""
