@@ -9,13 +9,38 @@ __pycache__/
 # VS Code
 .vscode/
 
-# Build output
-dist/
+# PyInstaller build output
 build/
+dist/
+*.spec.bak
+
+# Inno Setup build output
+installer/output/
+
+# Local application data accidentally created in the repository
+settings/
+profiles/
+projects/
+logs/
+recovery/
+output/
+
+# Generated release binaries
+*.exe
+*.msi
+*.zip
 
 # Generated audio
-output/*.mp3
-output/*.wav
+*.mp3
+*.wav
+*.flac
 
 # Temporary files
 temp/
+*.tmp
+*.bak
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
