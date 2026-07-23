@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QThread, QTimer, QUrl, Signal
@@ -83,13 +84,22 @@ class NarrationGenerationThread(QThread):
             self.narration_generated.emit(str(generated_path))
 
 
+def _application_root() -> Path:
+    """Return the writable root used by source and executable builds."""
+
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+
+    return Path(__file__).resolve().parents[2]
+
+
 class MainWindow(QMainWindow):
     """Main application window for Scriptolator."""
 
     def __init__(self) -> None:
         super().__init__()
 
-        self.project_root = Path(__file__).resolve().parents[2]
+        self.project_root = _application_root()
         self.current_project_path: Path | None = None
         self.last_generated_path: Path | None = None
         self.generation_thread: NarrationGenerationThread | None = None
