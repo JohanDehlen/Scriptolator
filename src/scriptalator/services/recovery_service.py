@@ -2,22 +2,26 @@ import json
 from pathlib import Path
 from typing import Any
 
+from services.application_paths import ApplicationPaths
 from services.project_service import ProjectService
 
 
 class RecoveryService:
     """Save and restore one automatic Scriptolator recovery project."""
 
-    RECOVERY_FOLDER_NAME = "recovery"
     RECOVERY_FILE_NAME = "unsaved-recovery.scriptolator"
     RECOVERY_FORMAT_NAME = "Scriptolator Recovery"
     RECOVERY_FORMAT_VERSION = 1
 
-    def __init__(self, project_root: Path) -> None:
-        self.project_root = Path(project_root)
-        self.recovery_folder = (
-            self.project_root / self.RECOVERY_FOLDER_NAME
-        )
+    def __init__(
+        self,
+        paths: ApplicationPaths | Path,
+    ) -> None:
+        if isinstance(paths, ApplicationPaths):
+            self.recovery_folder = paths.recovery
+        else:
+            self.recovery_folder = Path(paths) / "recovery"
+
         self.recovery_path = (
             self.recovery_folder / self.RECOVERY_FILE_NAME
         )

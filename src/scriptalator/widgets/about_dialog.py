@@ -1,13 +1,17 @@
 import platform
 import sys
+from pathlib import Path
 
 from PySide6 import __version__ as PYSIDE_VERSION
 from PySide6.QtCore import Qt, qVersion
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
+    QFrame,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -17,12 +21,26 @@ from PySide6.QtWidgets import (
 )
 
 from version import APP_NAME, APP_VERSION
+from widgets.help_viewer import HelpViewerDialog
+
+
+def _resource_path(filename: str) -> Path:
+    """Return a resource path for source and packaged builds."""
+
+    if getattr(sys, "frozen", False):
+        bundle_root = Path(
+            getattr(sys, "_MEIPASS", Path(sys.executable).parent)
+        )
+        return bundle_root / "resources" / filename
+
+    return Path(__file__).resolve().parents[1] / "resources" / filename
 
 
 class AboutDialog(QDialog):
-    """Display Scriptolator version and diagnostic information."""
+    """Display Scriptolator branding, help links, and diagnostics."""
 
     COPYRIGHT_TEXT = "© 2026 Johan Dehlen"
+    TAGLINE = "Professional AI Narration"
 
     def __init__(
         self,
@@ -39,40 +57,74 @@ class AboutDialog(QDialog):
 
         self.setWindowTitle(f"About {APP_NAME}")
         self.setModal(True)
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(620)
+        self.resize(620, 700)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 20)
         layout.setSpacing(12)
+
+        logo = QLabel()
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        logo_path = _resource_path("scriptolator.png")
+        logo_pixmap = QPixmap(str(logo_path))
+
+        if not logo_pixmap.isNull():
+            logo.setPixmap(
+                logo_pixmap.scaled(
+                    128,
+                    128,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
 
         title = QLabel(APP_NAME)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(
-            """
-            font-size: 28px;
-            font-weight: bold;
-            """
+            "font-size: 30px; font-weight: 700;"
         )
 
-        subtitle = QLabel(
-            "Transform scripts into professional AI narration."
+        tagline = QLabel(self.TAGLINE)
+        tagline.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tagline.setStyleSheet(
+            "font-size: 16px; font-weight: 600;"
         )
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle.setWordWrap(True)
+
+        description = QLabel(
+            "Transform scripts into professional AI narration "
+            "using Microsoft Edge Neural voices."
+        )
+        description.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        description.setWordWrap(True)
 
         version_label = QLabel(f"Version {APP_VERSION}")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        version_label.setStyleSheet("font-weight: 600;")
 
+        layout.addWidget(logo)
         layout.addWidget(title)
-        layout.addWidget(subtitle)
+        layout.addWidget(tagline)
+        layout.addWidget(description)
         layout.addWidget(version_label)
 
-        details = QGridLayout()
-        details.setHorizontalSpacing(18)
-        details.setVerticalSpacing(6)
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(separator)
+
+        product_details = QGridLayout()
+        product_details.setHorizontalSpacing(18)
+        product_details.setVerticalSpacing(7)
 
         detail_rows = [
             ("Created by", "Johan Dehlen"),
-            ("Powered by", "Microsoft Edge Neural Voices and edge-tts"),
+            (
+                "Narration engine",
+                "Microsoft Edge Neural Voices via edge-tts",
+            ),
+            ("Website", "Scriptolator.com"),
             ("Copyright", self.COPYRIGHT_TEXT),
         ]
 
@@ -86,24 +138,60 @@ class AboutDialog(QDialog):
                 ("Current project", self.current_project)
             )
 
-        for row, (label_text, value_text) in enumerate(detail_rows):
+        for row, (label_text, value_text) in enumerate(
+            detail_rows
+        ):
             label = QLabel(f"{label_text}:")
-            label.setStyleSheet("font-weight: bold;")
+            label.setStyleSheet("font-weight: 600;")
 
             value = QLabel(value_text)
             value.setWordWrap(True)
+            value.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
 
-            details.addWidget(label, row, 0)
-            details.addWidget(value, row, 1)
+            product_details.addWidget(label, row, 0)
+            product_details.addWidget(value, row, 1)
 
-        layout.addLayout(details)
+        layout.addLayout(product_details)
 
-        self.copyButton = QPushButton("Copy System Information")
-        self.copyButton.clicked.connect(
-            self._copy_system_information
+        help_buttons = QHBoxLayout()
+
+        quick_start_button = QPushButton("Quick Start")
+        quick_start_button.clicked.connect(
+            lambda: self._open_help(
+                "Quick Start Guide",
+                "QuickStart.md",
+            )
         )
 
-        layout.addWidget(self.copyButton)
+        user_guide_button = QPushButton("User Guide")
+        user_guide_button.clicked.connect(
+            lambda: self._open_help(
+                "User Guide",
+                "UserGuide.md",
+            )
+        )
+
+        release_notes_button = QPushButton("Release Notes")
+        release_notes_button.clicked.connect(
+            lambda: self._open_help(
+                "Release Notes",
+                "ReleaseNotes.md",
+            )
+        )
+
+        help_buttons.addWidget(quick_start_button)
+        help_buttons.addWidget(user_guide_button)
+        help_buttons.addWidget(release_notes_button)
+
+        layout.addLayout(help_buttons)
+
+        diagnostics_label = QLabel("System information")
+        diagnostics_label.setStyleSheet(
+            "font-size: 14px; font-weight: 600;"
+        )
+        layout.addWidget(diagnostics_label)
 
         self.systemInfo = QTextEdit()
         self.systemInfo.setReadOnly(True)
@@ -111,15 +199,26 @@ class AboutDialog(QDialog):
             self.build_system_information()
         )
         self.systemInfo.setMinimumHeight(170)
-
         layout.addWidget(self.systemInfo)
+
+        self.copyButton = QPushButton(
+            "Copy System Information"
+        )
+        self.copyButton.clicked.connect(
+            self._copy_system_information
+        )
+        layout.addWidget(self.copyButton)
 
         button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
         )
         button_box.accepted.connect(self.accept)
-
         layout.addWidget(button_box)
+
+        self.setWindowFlag(
+            Qt.WindowType.WindowContextHelpButtonHint,
+            False,
+        )
 
     def build_system_information(self) -> str:
         """Return diagnostic information suitable for issue reports."""
@@ -138,14 +237,34 @@ class AboutDialog(QDialog):
             )
 
         lines.append(
-            f"Current profile: {self.current_profile or 'No Profile'}"
+            (
+                "Current profile: "
+                f"{self.current_profile or 'No Profile'}"
+            )
         )
         lines.append(
-            f"Current project: {self.current_project or 'No Project'}"
+            (
+                "Current project: "
+                f"{self.current_project or 'No Project'}"
+            )
         )
         lines.append(f"Executable: {sys.executable}")
 
         return "\n".join(lines)
+
+    def _open_help(
+        self,
+        title: str,
+        document_name: str,
+    ) -> None:
+        """Open one bundled help document."""
+
+        dialog = HelpViewerDialog(
+            title=title,
+            document_name=document_name,
+            parent=self,
+        )
+        dialog.exec()
 
     def _copy_system_information(self) -> None:
         """Copy diagnostic information to the system clipboard."""
@@ -164,8 +283,6 @@ class AboutDialog(QDialog):
             self.build_system_information()
         )
 
-        self.copyButton.setText("Copied")
-
         QMessageBox.information(
             self,
             "System Information Copied",
@@ -174,5 +291,3 @@ class AboutDialog(QDialog):
                 "to the clipboard."
             ),
         )
-
-        self.copyButton.setText("Copy System Information")

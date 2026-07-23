@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from services.application_paths import ApplicationPaths
+
 
 class ProjectService:
     """Save and load Scriptolator project files."""
@@ -23,6 +25,46 @@ class ProjectService:
         "output_folder",
         "output_filename",
     }
+
+    def __init__(
+        self,
+        paths: ApplicationPaths | Path | None = None,
+    ) -> None:
+        if isinstance(paths, ApplicationPaths):
+            self.projects_folder = paths.projects
+        elif paths is not None:
+            self.projects_folder = (
+                Path(paths).expanduser() / "projects"
+            )
+        else:
+            self.projects_folder = Path.cwd() / "projects"
+
+    def ensure_projects_folder(self) -> Path:
+        """Create and return the default projects folder."""
+
+        try:
+            self.projects_folder.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+        except OSError as error:
+            raise RuntimeError(
+                f"Unable to access the projects folder:\n{error}"
+            ) from error
+
+        return self.projects_folder
+
+    def default_project_path(
+        self,
+        project_name: str = "Untitled",
+    ) -> Path:
+        """Return a default project path in the projects folder."""
+
+        normalized_name = project_name.strip() or "Untitled"
+
+        return self.normalize_project_path(
+            self.ensure_projects_folder() / normalized_name
+        )
 
     @classmethod
     def save_project(
@@ -144,9 +186,7 @@ class ProjectService:
                 "The selected file is not a Scriptolator project."
             )
 
-        format_version = file_data.get("format_version")
-
-        if format_version != cls.FORMAT_VERSION:
+        if file_data.get("format_version") != cls.FORMAT_VERSION:
             raise ValueError(
                 "This project uses an unsupported format version."
             )
@@ -189,9 +229,7 @@ class ProjectService:
     ) -> bool:
         """Return whether a path uses a supported project extension."""
 
-        suffix = Path(project_path).suffix.lower()
-
-        return suffix in {
+        return Path(project_path).suffix.lower() in {
             cls.FILE_EXTENSION,
             cls.LEGACY_FILE_EXTENSION,
         }
@@ -216,60 +254,49 @@ class ProjectService:
             missing_list = ", ".join(
                 sorted(missing_fields)
             )
-
             raise ValueError(
                 f"Project data is missing: {missing_list}"
             )
 
-        script = cls._require_string(
-            project_data,
-            "script",
-        )
-        language = cls._require_string(
-            project_data,
-            "language",
-        )
-        voice = cls._require_string(
-            project_data,
-            "voice",
-        )
-        output_folder = cls._require_string(
-            project_data,
-            "output_folder",
-        )
-        output_filename = cls._require_string(
-            project_data,
-            "output_filename",
-        )
-
-        speed = cls._require_integer(
-            project_data,
-            "speed",
-            minimum=-100,
-            maximum=100,
-        )
-        pitch = cls._require_integer(
-            project_data,
-            "pitch",
-            minimum=-100,
-            maximum=100,
-        )
-        volume = cls._require_integer(
-            project_data,
-            "volume",
-            minimum=0,
-            maximum=100,
-        )
-
         return {
-            "script": script,
-            "language": language,
-            "voice": voice,
-            "speed": speed,
-            "pitch": pitch,
-            "volume": volume,
-            "output_folder": output_folder,
-            "output_filename": output_filename,
+            "script": cls._require_string(
+                project_data,
+                "script",
+            ),
+            "language": cls._require_string(
+                project_data,
+                "language",
+            ),
+            "voice": cls._require_string(
+                project_data,
+                "voice",
+            ),
+            "speed": cls._require_integer(
+                project_data,
+                "speed",
+                minimum=-100,
+                maximum=100,
+            ),
+            "pitch": cls._require_integer(
+                project_data,
+                "pitch",
+                minimum=-100,
+                maximum=100,
+            ),
+            "volume": cls._require_integer(
+                project_data,
+                "volume",
+                minimum=0,
+                maximum=100,
+            ),
+            "output_folder": cls._require_string(
+                project_data,
+                "output_folder",
+            ),
+            "output_filename": cls._require_string(
+                project_data,
+                "output_filename",
+            ),
         }
 
     @staticmethod

@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from services.application_paths import ApplicationPaths
+
 
 class ProfileService:
     """Create and manage user-defined narration profile files."""
@@ -11,30 +13,13 @@ class ProfileService:
     FORMAT_VERSION = 1
 
     INVALID_FILENAME_CHARACTERS = set('<>:"/\\|?*')
-
     RESERVED_WINDOWS_NAMES = {
         "CON",
         "PRN",
         "AUX",
         "NUL",
-        "COM1",
-        "COM2",
-        "COM3",
-        "COM4",
-        "COM5",
-        "COM6",
-        "COM7",
-        "COM8",
-        "COM9",
-        "LPT1",
-        "LPT2",
-        "LPT3",
-        "LPT4",
-        "LPT5",
-        "LPT6",
-        "LPT7",
-        "LPT8",
-        "LPT9",
+        *(f"COM{number}" for number in range(1, 10)),
+        *(f"LPT{number}" for number in range(1, 10)),
     }
 
     REQUIRED_FIELDS = {
@@ -45,9 +30,16 @@ class ProfileService:
         "volume",
     }
 
-    def __init__(self, project_root: Path) -> None:
-        self.project_root = Path(project_root).expanduser()
-        self.profiles_folder = self.project_root / "profiles"
+    def __init__(
+        self,
+        paths: ApplicationPaths | Path,
+    ) -> None:
+        if isinstance(paths, ApplicationPaths):
+            self.profiles_folder = paths.profiles
+        else:
+            self.profiles_folder = (
+                Path(paths).expanduser() / "profiles"
+            )
 
     def ensure_profiles_folder(self) -> Path:
         """Create and return the profiles folder."""
@@ -77,10 +69,7 @@ class ProfileService:
             if profile_path.is_file()
         }
 
-        return sorted(
-            profile_names,
-            key=str.casefold,
-        )
+        return sorted(profile_names, key=str.casefold)
 
     def create_profile(
         self,
@@ -139,9 +128,7 @@ class ProfileService:
             )
 
         try:
-            file_text = profile_path.read_text(
-                encoding="utf-8"
-            )
+            file_text = profile_path.read_text(encoding="utf-8")
         except OSError as error:
             raise RuntimeError(
                 f"Unable to read the profile:\n{error}"
@@ -151,7 +138,10 @@ class ProfileService:
             file_data = json.loads(file_text)
         except json.JSONDecodeError as error:
             raise ValueError(
-                f'The profile "{normalized_name}" contains invalid JSON.'
+                (
+                    f'The profile "{normalized_name}" '
+                    "contains invalid JSON."
+                )
             ) from error
 
         if not isinstance(file_data, dict):
@@ -161,7 +151,7 @@ class ProfileService:
 
         if file_data.get("format") != self.FORMAT_NAME:
             raise ValueError(
-                "The selected file is not a Scriptalator profile."
+                "The selected file is not a Scriptolator profile."
             )
 
         if file_data.get("format_version") != self.FORMAT_VERSION:
@@ -170,13 +160,12 @@ class ProfileService:
             )
 
         stored_name = file_data.get("name")
+        profile_data = file_data.get("profile")
 
         if not isinstance(stored_name, str):
             raise ValueError(
                 "The profile name is missing or invalid."
             )
-
-        profile_data = file_data.get("profile")
 
         if not isinstance(profile_data, dict):
             raise ValueError(
@@ -210,10 +199,7 @@ class ProfileService:
                 f'Profile not found: "{normalized_current_name}"'
             )
 
-        if (
-            current_path != new_path
-            and new_path.exists()
-        ):
+        if current_path != new_path and new_path.exists():
             raise FileExistsError(
                 f'A profile named "{normalized_new_name}" already exists.'
             )
@@ -278,9 +264,8 @@ class ProfileService:
         """Return the file path for a validated profile name."""
 
         normalized_name = self.validate_profile_name(profile_name)
-        profiles_folder = self.ensure_profiles_folder()
 
-        return profiles_folder / (
+        return self.ensure_profiles_folder() / (
             normalized_name + self.FILE_EXTENSION
         )
 
@@ -298,15 +283,8 @@ class ProfileService:
 
         normalized_name = profile_name.strip()
 
-        if not normalized_name:
-            raise ValueError(
-                "Enter a profile name."
-            )
-
-        if normalized_name in {".", ".."}:
-            raise ValueError(
-                "Enter a valid profile name."
-            )
+        if not normalized_name or normalized_name in {".", ".."}:
+            raise ValueError("Enter a valid profile name.")
 
         if normalized_name.endswith((".", " ")):
             raise ValueError(
@@ -317,13 +295,16 @@ class ProfileService:
             {
                 character
                 for character in normalized_name
-                if character in cls.INVALID_FILENAME_CHARACTERS
+                if (
+                    ord(character) < 32
+                    or character
+                    in cls.INVALID_FILENAME_CHARACTERS
+                )
             }
         )
 
         if invalid_characters:
             invalid_text = " ".join(invalid_characters)
-
             raise ValueError(
                 (
                     "The profile name contains invalid characters: "
@@ -331,7 +312,9 @@ class ProfileService:
                 )
             )
 
-        reserved_base_name = normalized_name.split(".", 1)[0].upper()
+        reserved_base_name = (
+            normalized_name.split(".", 1)[0].upper()
+        )
 
         if reserved_base_name in cls.RESERVED_WINDOWS_NAMES:
             raise ValueError(
@@ -357,10 +340,7 @@ class ProfileService:
         )
 
         if missing_fields:
-            missing_text = ", ".join(
-                sorted(missing_fields)
-            )
-
+            missing_text = ", ".join(sorted(missing_fields))
             raise ValueError(
                 f"Profile data is missing: {missing_text}"
             )
@@ -379,31 +359,27 @@ class ProfileService:
                 "Select a narration voice before saving a profile."
             )
 
-        speed = cls._require_integer(
-            profile_data,
-            "speed",
-            minimum=-100,
-            maximum=100,
-        )
-        pitch = cls._require_integer(
-            profile_data,
-            "pitch",
-            minimum=-100,
-            maximum=100,
-        )
-        volume = cls._require_integer(
-            profile_data,
-            "volume",
-            minimum=0,
-            maximum=100,
-        )
-
         return {
             "language": language,
             "voice": voice,
-            "speed": speed,
-            "pitch": pitch,
-            "volume": volume,
+            "speed": cls._require_integer(
+                profile_data,
+                "speed",
+                minimum=-100,
+                maximum=100,
+            ),
+            "pitch": cls._require_integer(
+                profile_data,
+                "pitch",
+                minimum=-100,
+                maximum=100,
+            ),
+            "volume": cls._require_integer(
+                profile_data,
+                "volume",
+                minimum=0,
+                maximum=100,
+            ),
         }
 
     def _write_profile(
@@ -430,6 +406,8 @@ class ProfileService:
         )
 
         try:
+            self.ensure_profiles_folder()
+
             temporary_path.write_text(
                 json.dumps(
                     file_data,

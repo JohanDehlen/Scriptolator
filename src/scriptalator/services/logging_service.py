@@ -2,24 +2,27 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from services.application_paths import ApplicationPaths
+
 
 class LoggingService:
     """Configure and expose Scriptolator application logging."""
 
     LOGGER_NAME = "scriptolator"
-    LOG_FOLDER_NAME = "logs"
     LOG_FILE_NAME = "scriptolator.log"
     MAX_LOG_BYTES = 1_000_000
     BACKUP_COUNT = 3
 
-    def __init__(self, project_root: Path) -> None:
-        self.project_root = Path(project_root)
-        self.log_folder = (
-            self.project_root / self.LOG_FOLDER_NAME
-        )
-        self.log_path = (
-            self.log_folder / self.LOG_FILE_NAME
-        )
+    def __init__(
+        self,
+        paths: ApplicationPaths | Path,
+    ) -> None:
+        if isinstance(paths, ApplicationPaths):
+            self.log_folder = paths.logs
+        else:
+            self.log_folder = Path(paths) / "logs"
+
+        self.log_path = self.log_folder / self.LOG_FILE_NAME
 
         self.logger = logging.getLogger(self.LOGGER_NAME)
         self.logger.setLevel(logging.INFO)
@@ -30,10 +33,14 @@ class LoggingService:
     def _configure_handler(self) -> None:
         """Create one rotating UTF-8 log handler."""
 
+        resolved_log_path = self.log_path.resolve()
+
         for handler in self.logger.handlers:
-            if isinstance(handler, RotatingFileHandler):
-                if Path(handler.baseFilename) == self.log_path.resolve():
-                    return
+            if not isinstance(handler, RotatingFileHandler):
+                continue
+
+            if Path(handler.baseFilename) == resolved_log_path:
+                return
 
         self.log_folder.mkdir(
             parents=True,

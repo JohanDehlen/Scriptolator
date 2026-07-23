@@ -2,14 +2,19 @@ from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSettings
 
+from services.application_paths import ApplicationPaths
+
 
 class SettingsService:
-    """Store and retrieve Scriptalator application preferences."""
+    """Store and retrieve Scriptolator application preferences."""
 
     ORGANIZATION_NAME = "JohanDehlen"
     APPLICATION_NAME = "Scriptolator"
     PREVIOUS_APPLICATION_NAME = "Scriptalator"
     LEGACY_APPLICATION_NAME = "Voiceanator"
+
+    SETTINGS_FILE_NAME = "settings.ini"
+    FILE_MIGRATION_KEY = "application/file_settings_migrated"
 
     VOICE_KEY = "narration/last_voice"
     LANGUAGE_KEY = "narration/last_language"
@@ -30,12 +35,6 @@ class SettingsService:
     CONFIRM_BEFORE_CLEARING_KEY = "preferences/confirm_before_clearing"
 
     LEGACY_OUTPUT_FILENAME_KEY = "output/last_filename"
-    SCRIPTALATOR_MIGRATION_KEY = (
-        "application/scriptalator_settings_migrated"
-    )
-    VOICEANATOR_MIGRATION_KEY = (
-        "application/voiceanator_settings_migrated"
-    )
 
     DEFAULT_LANGUAGE = ""
     DEFAULT_VOICE = ""
@@ -49,16 +48,57 @@ class SettingsService:
     DEFAULT_RESTORE_OUTPUT_FOLDER = True
     DEFAULT_CONFIRM_BEFORE_CLEARING = True
 
-    def __init__(self, project_root: Path) -> None:
-        self.project_root = Path(project_root)
+    MIGRATION_KEYS = (
+        VOICE_KEY,
+        LANGUAGE_KEY,
+        SPEED_KEY,
+        PITCH_KEY,
+        VOLUME_KEY,
+        FAVORITE_VOICES_KEY,
+        LAST_PROFILE_KEY,
+        RECENT_PROJECTS_KEY,
+        OUTPUT_FOLDER_KEY,
+        LAST_SCRIPT_OPEN_FOLDER_KEY,
+        LAST_SCRIPT_SAVE_FOLDER_KEY,
+        WINDOW_GEOMETRY_KEY,
+        WINDOW_STATE_KEY,
+        RESTORE_WINDOW_STATE_KEY,
+        RESTORE_LAST_PROFILE_KEY,
+        RESTORE_OUTPUT_FOLDER_KEY,
+        CONFIRM_BEFORE_CLEARING_KEY,
+    )
 
-        self.settings = QSettings(
-            self.ORGANIZATION_NAME,
-            self.APPLICATION_NAME,
+    def __init__(
+        self,
+        paths: ApplicationPaths | Path,
+    ) -> None:
+        if isinstance(paths, ApplicationPaths):
+            self.application_paths = paths
+            self.project_root = paths.application_root
+            self.default_output_folder = paths.output
+            self.default_projects_folder = paths.projects
+            self.settings_folder = paths.settings
+        else:
+            self.application_paths = None
+            self.project_root = Path(paths).expanduser()
+            self.default_output_folder = self.project_root / "output"
+            self.default_projects_folder = self.project_root / "projects"
+            self.settings_folder = self.project_root / "settings"
+
+        self.settings_folder.mkdir(
+            parents=True,
+            exist_ok=True,
         )
 
-        self._migrate_scriptalator_settings()
-        self._migrate_voiceanator_settings()
+        self.settings_path = (
+            self.settings_folder / self.SETTINGS_FILE_NAME
+        )
+        self.settings = QSettings(
+            str(self.settings_path),
+            QSettings.Format.IniFormat,
+        )
+
+        self._migrate_existing_settings()
         self._remove_legacy_filename_setting()
 
     def get_restore_window_state(self) -> bool:
@@ -113,7 +153,7 @@ class SettingsService:
         )
 
     def get_confirm_before_clearing(self) -> bool:
-        """Return whether clearing a project requires confirmation."""
+        """Return whether clearing requires confirmation."""
 
         return self.settings.value(
             self.CONFIRM_BEFORE_CLEARING_KEY,
@@ -122,7 +162,7 @@ class SettingsService:
         )
 
     def set_confirm_before_clearing(self, enabled: bool) -> None:
-        """Store whether clearing a project requires confirmation."""
+        """Store whether clearing requires confirmation."""
 
         self._set_boolean(
             self.CONFIRM_BEFORE_CLEARING_KEY,
@@ -146,21 +186,14 @@ class SettingsService:
     def get_window_geometry(self) -> QByteArray:
         """Return the saved main-window geometry."""
 
-        saved_geometry = self.settings.value(
+        value = self.settings.value(
             self.WINDOW_GEOMETRY_KEY,
             QByteArray(),
         )
+        return value if isinstance(value, QByteArray) else QByteArray()
 
-        if isinstance(saved_geometry, QByteArray):
-            return saved_geometry
-
-        return QByteArray()
-
-    def set_window_geometry(
-        self,
-        geometry: QByteArray,
-    ) -> None:
-        """Store the main-window size, position, and display state."""
+    def set_window_geometry(self, geometry: QByteArray) -> None:
+        """Store main-window geometry."""
 
         if not isinstance(geometry, QByteArray):
             raise TypeError(
@@ -176,21 +209,14 @@ class SettingsService:
     def get_window_state(self) -> QByteArray:
         """Return the saved QMainWindow state."""
 
-        saved_state = self.settings.value(
+        value = self.settings.value(
             self.WINDOW_STATE_KEY,
             QByteArray(),
         )
+        return value if isinstance(value, QByteArray) else QByteArray()
 
-        if isinstance(saved_state, QByteArray):
-            return saved_state
-
-        return QByteArray()
-
-    def set_window_state(
-        self,
-        window_state: QByteArray,
-    ) -> None:
-        """Store the QMainWindow toolbar and dock state."""
+    def set_window_state(self, window_state: QByteArray) -> None:
+        """Store the QMainWindow state."""
 
         if not isinstance(window_state, QByteArray):
             raise TypeError(
@@ -211,7 +237,7 @@ class SettingsService:
         self.settings.sync()
 
     def get_language(self) -> str:
-        """Return the last selected language code."""
+        """Return the last selected language."""
 
         return self.settings.value(
             self.LANGUAGE_KEY,
@@ -220,7 +246,7 @@ class SettingsService:
         ).strip()
 
     def set_language(self, language: str) -> None:
-        """Store the selected language code."""
+        """Store the selected language."""
 
         self.settings.setValue(
             self.LANGUAGE_KEY,
@@ -229,7 +255,7 @@ class SettingsService:
         self.settings.sync()
 
     def get_voice(self) -> str:
-        """Return the last selected Microsoft voice ID."""
+        """Return the last selected voice."""
 
         return self.settings.value(
             self.VOICE_KEY,
@@ -238,7 +264,7 @@ class SettingsService:
         ).strip()
 
     def set_voice(self, voice: str) -> None:
-        """Store the selected Microsoft voice ID."""
+        """Store the selected voice."""
 
         normalized_voice = voice.strip()
 
@@ -252,7 +278,7 @@ class SettingsService:
         self.settings.sync()
 
     def get_last_profile(self) -> str:
-        """Return the last selected narration profile name."""
+        """Return the last selected profile name."""
 
         return self.settings.value(
             self.LAST_PROFILE_KEY,
@@ -261,7 +287,7 @@ class SettingsService:
         ).strip()
 
     def set_last_profile(self, profile_name: str) -> None:
-        """Store the last selected narration profile name."""
+        """Store the last selected profile name."""
 
         self.settings.setValue(
             self.LAST_PROFILE_KEY,
@@ -270,13 +296,13 @@ class SettingsService:
         self.settings.sync()
 
     def clear_last_profile(self) -> None:
-        """Clear the saved last-profile selection."""
+        """Clear the saved profile selection."""
 
         self.settings.remove(self.LAST_PROFILE_KEY)
         self.settings.sync()
 
     def get_recent_projects(self) -> list[Path]:
-        """Return existing recent project files, newest first."""
+        """Return existing recent project files."""
 
         saved_value = self.settings.value(
             self.RECENT_PROJECTS_KEY,
@@ -294,18 +320,16 @@ class SettingsService:
         seen_paths: set[str] = set()
 
         for saved_path in saved_paths:
-            path_text = str(saved_path).strip()
-
-            if not path_text:
-                continue
-
-            project_path = Path(path_text).expanduser()
+            project_path = Path(
+                str(saved_path).strip()
+            ).expanduser()
             normalized_key = str(project_path).casefold()
 
-            if normalized_key in seen_paths:
-                continue
-
-            if not project_path.is_file():
+            if (
+                not str(saved_path).strip()
+                or normalized_key in seen_paths
+                or not project_path.is_file()
+            ):
                 continue
 
             seen_paths.add(normalized_key)
@@ -315,7 +339,6 @@ class SettingsService:
                 break
 
         self.set_recent_projects(recent_projects)
-
         return recent_projects
 
     def set_recent_projects(
@@ -331,13 +354,9 @@ class SettingsService:
             path_text = str(
                 Path(project_path).expanduser()
             ).strip()
-
-            if not path_text:
-                continue
-
             normalized_key = path_text.casefold()
 
-            if normalized_key in seen_paths:
+            if not path_text or normalized_key in seen_paths:
                 continue
 
             seen_paths.add(normalized_key)
@@ -356,7 +375,7 @@ class SettingsService:
         self,
         project_path: Path | str,
     ) -> None:
-        """Move a project to the top of the recent-project list."""
+        """Move a project to the top of the recent list."""
 
         normalized_path = Path(project_path).expanduser()
 
@@ -369,37 +388,35 @@ class SettingsService:
             if str(path).casefold()
             != str(normalized_path).casefold()
         ]
-
         recent_projects.insert(0, normalized_path)
-
         self.set_recent_projects(recent_projects)
 
     def remove_recent_project(
         self,
         project_path: Path | str,
     ) -> None:
-        """Remove one project from the recent-project list."""
+        """Remove one project from the recent list."""
 
         normalized_key = str(
             Path(project_path).expanduser()
         ).casefold()
 
-        recent_projects = [
-            path
-            for path in self.get_recent_projects()
-            if str(path).casefold() != normalized_key
-        ]
-
-        self.set_recent_projects(recent_projects)
+        self.set_recent_projects(
+            [
+                path
+                for path in self.get_recent_projects()
+                if str(path).casefold() != normalized_key
+            ]
+        )
 
     def clear_recent_projects(self) -> None:
-        """Clear all recent-project entries."""
+        """Clear all recent projects."""
 
         self.settings.remove(self.RECENT_PROJECTS_KEY)
         self.settings.sync()
 
     def get_favorite_voices(self) -> list[str]:
-        """Return the saved favorite Microsoft voice IDs."""
+        """Return saved favourite voice IDs."""
 
         saved_value = self.settings.value(
             self.FAVORITE_VOICES_KEY,
@@ -413,14 +430,12 @@ class SettingsService:
         else:
             saved_voices = []
 
-        normalized_voices = {
-            str(voice).strip()
-            for voice in saved_voices
-            if str(voice).strip()
-        }
-
         return sorted(
-            normalized_voices,
+            {
+                str(voice).strip()
+                for voice in saved_voices
+                if str(voice).strip()
+            },
             key=str.lower,
         )
 
@@ -428,7 +443,7 @@ class SettingsService:
         self,
         favorite_voices: list[str],
     ) -> None:
-        """Store the complete list of favorite voice IDs."""
+        """Store favourite voice IDs."""
 
         normalized_voices = sorted(
             {
@@ -446,17 +461,16 @@ class SettingsService:
         self.settings.sync()
 
     def is_favorite_voice(self, voice: str) -> bool:
-        """Return whether a voice ID is currently a favorite."""
+        """Return whether a voice is a favourite."""
 
         normalized_voice = voice.strip()
-
-        if not normalized_voice:
-            return False
-
-        return normalized_voice in self.get_favorite_voices()
+        return bool(
+            normalized_voice
+            and normalized_voice in self.get_favorite_voices()
+        )
 
     def add_favorite_voice(self, voice: str) -> None:
-        """Add a Microsoft voice ID to favorites."""
+        """Add a favourite voice."""
 
         normalized_voice = voice.strip()
 
@@ -465,11 +479,10 @@ class SettingsService:
 
         favorites = set(self.get_favorite_voices())
         favorites.add(normalized_voice)
-
         self.set_favorite_voices(list(favorites))
 
     def remove_favorite_voice(self, voice: str) -> None:
-        """Remove a Microsoft voice ID from favorites."""
+        """Remove a favourite voice."""
 
         normalized_voice = voice.strip()
 
@@ -478,16 +491,10 @@ class SettingsService:
 
         favorites = set(self.get_favorite_voices())
         favorites.discard(normalized_voice)
-
         self.set_favorite_voices(list(favorites))
 
     def toggle_favorite_voice(self, voice: str) -> bool:
-        """
-        Toggle a voice favorite.
-
-        Returns:
-            True when the voice is a favorite after toggling.
-        """
+        """Toggle a favourite and return its resulting state."""
 
         normalized_voice = voice.strip()
 
@@ -502,141 +509,122 @@ class SettingsService:
         return True
 
     def get_speed(self) -> int:
-        """Return the saved speaking-speed adjustment."""
+        """Return speaking speed."""
 
         return self._get_bounded_integer(
-            key=self.SPEED_KEY,
-            default=self.DEFAULT_SPEED,
-            minimum=-100,
-            maximum=100,
+            self.SPEED_KEY,
+            self.DEFAULT_SPEED,
+            -100,
+            100,
         )
 
     def set_speed(self, speed: int) -> None:
-        """Store the speaking-speed adjustment."""
+        """Store speaking speed."""
 
         self._set_bounded_integer(
-            key=self.SPEED_KEY,
-            value=speed,
-            minimum=-100,
-            maximum=100,
+            self.SPEED_KEY,
+            speed,
+            -100,
+            100,
         )
 
     def get_pitch(self) -> int:
-        """Return the saved pitch adjustment."""
+        """Return pitch."""
 
         return self._get_bounded_integer(
-            key=self.PITCH_KEY,
-            default=self.DEFAULT_PITCH,
-            minimum=-100,
-            maximum=100,
+            self.PITCH_KEY,
+            self.DEFAULT_PITCH,
+            -100,
+            100,
         )
 
     def set_pitch(self, pitch: int) -> None:
-        """Store the pitch adjustment."""
+        """Store pitch."""
 
         self._set_bounded_integer(
-            key=self.PITCH_KEY,
-            value=pitch,
-            minimum=-100,
-            maximum=100,
+            self.PITCH_KEY,
+            pitch,
+            -100,
+            100,
         )
 
     def get_volume(self) -> int:
-        """Return the saved volume level."""
+        """Return volume."""
 
         return self._get_bounded_integer(
-            key=self.VOLUME_KEY,
-            default=self.DEFAULT_VOLUME,
-            minimum=0,
-            maximum=100,
+            self.VOLUME_KEY,
+            self.DEFAULT_VOLUME,
+            0,
+            100,
         )
 
     def set_volume(self, volume: int) -> None:
-        """Store the volume level."""
+        """Store volume."""
 
         self._set_bounded_integer(
-            key=self.VOLUME_KEY,
-            value=volume,
-            minimum=0,
-            maximum=100,
+            self.VOLUME_KEY,
+            volume,
+            0,
+            100,
         )
 
     def get_last_script_open_folder(self) -> Path:
         """Return the last folder used to open a script."""
 
-        default_folder = self.project_root
-
-        saved_folder = self.settings.value(
+        return self._get_existing_folder(
             self.LAST_SCRIPT_OPEN_FOLDER_KEY,
-            str(default_folder),
-            type=str,
-        ).strip()
-
-        folder_path = Path(saved_folder).expanduser()
-
-        if not folder_path.is_dir():
-            folder_path = default_folder
-
-        return folder_path
+            self.default_projects_folder,
+        )
 
     def set_last_script_open_folder(
         self,
         folder_path: Path | str,
     ) -> None:
-        """Store the last folder used to open a script."""
+        """Store the last script-open folder."""
 
         self._set_existing_folder(
-            key=self.LAST_SCRIPT_OPEN_FOLDER_KEY,
-            folder_path=folder_path,
+            self.LAST_SCRIPT_OPEN_FOLDER_KEY,
+            folder_path,
         )
 
     def get_last_script_save_folder(self) -> Path:
         """Return the last folder used to save a script."""
 
-        default_folder = self.get_last_script_open_folder()
-
-        saved_folder = self.settings.value(
+        return self._get_existing_folder(
             self.LAST_SCRIPT_SAVE_FOLDER_KEY,
-            str(default_folder),
-            type=str,
-        ).strip()
-
-        folder_path = Path(saved_folder).expanduser()
-
-        if not folder_path.is_dir():
-            folder_path = default_folder
-
-        return folder_path
+            self.get_last_script_open_folder(),
+        )
 
     def set_last_script_save_folder(
         self,
         folder_path: Path | str,
     ) -> None:
-        """Store the last folder used to save a script."""
+        """Store the last script-save folder."""
 
         self._set_existing_folder(
-            key=self.LAST_SCRIPT_SAVE_FOLDER_KEY,
-            folder_path=folder_path,
+            self.LAST_SCRIPT_SAVE_FOLDER_KEY,
+            folder_path,
         )
 
     def get_output_folder(self) -> Path:
         """Return the saved output folder."""
 
-        default_output_folder = self.project_root / "output"
-
         saved_folder = self.settings.value(
             self.OUTPUT_FOLDER_KEY,
-            str(default_output_folder),
+            str(self.default_output_folder),
             type=str,
         ).strip()
 
-        output_folder = self._resolve_output_folder(
-            saved_folder=saved_folder,
-            default_output_folder=default_output_folder,
-        )
+        output_folder = Path(saved_folder).expanduser()
+
+        if not output_folder.is_dir():
+            output_folder = self.default_output_folder
+            output_folder.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
 
         self.set_output_folder(output_folder)
-
         return output_folder
 
     def set_output_folder(
@@ -645,16 +633,19 @@ class SettingsService:
     ) -> None:
         """Store the selected output folder."""
 
-        normalized_folder = str(
-            Path(output_folder).expanduser()
-        ).strip()
+        normalized_folder = Path(output_folder).expanduser()
 
-        if not normalized_folder:
+        try:
+            normalized_folder.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+        except OSError:
             return
 
         self.settings.setValue(
             self.OUTPUT_FOLDER_KEY,
-            normalized_folder,
+            str(normalized_folder),
         )
         self.settings.sync()
 
@@ -666,7 +657,7 @@ class SettingsService:
         pitch: int,
         volume: int,
     ) -> None:
-        """Store all narration preferences together."""
+        """Store all narration settings together."""
 
         self.set_language(language)
         self.set_voice(voice)
@@ -674,91 +665,47 @@ class SettingsService:
         self.set_pitch(pitch)
         self.set_volume(volume)
 
-    def _migrate_scriptalator_settings(self) -> None:
-        """Copy Scriptalator settings into Scriptolator once."""
+    def _migrate_existing_settings(self) -> None:
+        """Copy registry-backed settings into settings.ini once."""
 
-        migration_complete = self.settings.value(
-            self.SCRIPTALATOR_MIGRATION_KEY,
+        if self.settings.value(
+            self.FILE_MIGRATION_KEY,
             False,
             type=bool,
-        )
-
-        if migration_complete:
+        ):
             return
 
-        previous_settings = QSettings(
-            self.ORGANIZATION_NAME,
-            self.PREVIOUS_APPLICATION_NAME,
+        sources = (
+            QSettings(
+                self.ORGANIZATION_NAME,
+                self.APPLICATION_NAME,
+            ),
+            QSettings(
+                self.ORGANIZATION_NAME,
+                self.PREVIOUS_APPLICATION_NAME,
+            ),
+            QSettings(
+                self.ORGANIZATION_NAME,
+                self.LEGACY_APPLICATION_NAME,
+            ),
         )
 
-        migration_keys = (
-            self.VOICE_KEY,
-            self.LANGUAGE_KEY,
-            self.SPEED_KEY,
-            self.PITCH_KEY,
-            self.VOLUME_KEY,
-            self.FAVORITE_VOICES_KEY,
-            self.LAST_PROFILE_KEY,
-            self.RECENT_PROJECTS_KEY,
-            self.OUTPUT_FOLDER_KEY,
-            self.WINDOW_GEOMETRY_KEY,
-            self.WINDOW_STATE_KEY,
-        )
-
-        for key in migration_keys:
+        for key in self.MIGRATION_KEYS:
             if self.settings.contains(key):
                 continue
 
-            if not previous_settings.contains(key):
-                continue
+            for source in sources:
+                if not source.contains(key):
+                    continue
 
-            self.settings.setValue(
-                key,
-                previous_settings.value(key),
-            )
-
-        self.settings.setValue(
-            self.SCRIPTALATOR_MIGRATION_KEY,
-            True,
-        )
-        self.settings.sync()
-
-    def _migrate_voiceanator_settings(self) -> None:
-        """Copy any remaining Voiceanator settings once."""
-
-        migration_complete = self.settings.value(
-            self.VOICEANATOR_MIGRATION_KEY,
-            False,
-            type=bool,
-        )
-
-        if migration_complete:
-            return
-
-        legacy_settings = QSettings(
-            self.ORGANIZATION_NAME,
-            self.LEGACY_APPLICATION_NAME,
-        )
-
-        migration_keys = (
-            self.VOICE_KEY,
-            self.OUTPUT_FOLDER_KEY,
-        )
-
-        for key in migration_keys:
-            if self.settings.contains(key):
-                continue
-
-            if not legacy_settings.contains(key):
-                continue
-
-            self.settings.setValue(
-                key,
-                legacy_settings.value(key),
-            )
+                self.settings.setValue(
+                    key,
+                    source.value(key),
+                )
+                break
 
         self.settings.setValue(
-            self.VOICEANATOR_MIGRATION_KEY,
+            self.FILE_MIGRATION_KEY,
             True,
         )
         self.settings.sync()
@@ -766,71 +713,40 @@ class SettingsService:
     def _remove_legacy_filename_setting(self) -> None:
         """Remove the old saved output filename."""
 
-        if not self.settings.contains(
+        if self.settings.contains(
             self.LEGACY_OUTPUT_FILENAME_KEY
         ):
-            return
+            self.settings.remove(
+                self.LEGACY_OUTPUT_FILENAME_KEY
+            )
+            self.settings.sync()
 
-        self.settings.remove(
-            self.LEGACY_OUTPUT_FILENAME_KEY
-        )
-        self.settings.sync()
-
-    @staticmethod
-    def _resolve_output_folder(
-        saved_folder: str,
-        default_output_folder: Path,
-    ) -> Path:
-        """Resolve the output folder after application renames."""
-
-        if not saved_folder:
-            return default_output_folder
-
-        saved_path = Path(saved_folder).expanduser()
-
-        is_legacy_project_output = (
-            saved_path.name.casefold() == "output"
-            and saved_path.parent.name.casefold()
-            in {
-                "voiceanator",
-                "scriptalator",
-            }
-        )
-
-        if is_legacy_project_output:
-            return default_output_folder
-
-        if not saved_path.exists():
-            return default_output_folder
-
-        return saved_path
-
-    def _get_bounded_integer(
+    def _get_existing_folder(
         self,
         key: str,
-        default: int,
-        minimum: int,
-        maximum: int,
-    ) -> int:
-        """Return a saved integer restricted to an accepted range."""
+        default_folder: Path,
+    ) -> Path:
+        """Return a saved existing folder or its default."""
 
-        value = self.settings.value(
+        saved_folder = self.settings.value(
             key,
-            default,
-            type=int,
-        )
+            str(default_folder),
+            type=str,
+        ).strip()
 
-        if value < minimum or value > maximum:
-            return default
+        folder_path = Path(saved_folder).expanduser()
 
-        return value
+        if not folder_path.is_dir():
+            folder_path = default_folder
+
+        return folder_path
 
     def _set_existing_folder(
         self,
         key: str,
         folder_path: Path | str,
     ) -> None:
-        """Store an existing folder path."""
+        """Store an existing folder."""
 
         normalized_folder = Path(folder_path).expanduser()
 
@@ -843,12 +759,32 @@ class SettingsService:
         )
         self.settings.sync()
 
+    def _get_bounded_integer(
+        self,
+        key: str,
+        default: int,
+        minimum: int,
+        maximum: int,
+    ) -> int:
+        """Return a bounded saved integer."""
+
+        value = self.settings.value(
+            key,
+            default,
+            type=int,
+        )
+
+        if value < minimum or value > maximum:
+            return default
+
+        return value
+
     def _set_boolean(
         self,
         key: str,
         value: bool,
     ) -> None:
-        """Store a boolean setting."""
+        """Store a boolean."""
 
         if not isinstance(value, bool):
             raise TypeError(
@@ -865,7 +801,7 @@ class SettingsService:
         minimum: int,
         maximum: int,
     ) -> None:
-        """Store an integer after validating its range."""
+        """Store a validated bounded integer."""
 
         if isinstance(value, bool) or not isinstance(value, int):
             raise TypeError(

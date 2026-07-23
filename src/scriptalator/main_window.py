@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from services.application_paths import ApplicationPaths
 from services.edge_tts_service import EdgeTTSService
 from services.profile_service import ProfileService
 from services.project_service import ProjectService
@@ -100,25 +101,32 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
 
-        self.project_root = _application_root()
+        self.application_paths = ApplicationPaths.create()
+        self.project_root = self.application_paths.application_root
         self.current_project_path: Path | None = None
         self.last_generated_path: Path | None = None
         self.generation_thread: NarrationGenerationThread | None = None
 
         self.settings_service = SettingsService(
-            self.project_root
+            self.application_paths
         )
         self.profile_service = ProfileService(
-            self.project_root
+            self.application_paths
+        )
+        self.project_service = ProjectService(
+            self.application_paths
         )
         self.recovery_service = RecoveryService(
-            self.project_root
+            self.application_paths
         )
         self.logging_service = LoggingService(
-            self.project_root
+            self.application_paths
         )
         self.logging_service.info(
             f"{APP_NAME} {APP_VERSION} started."
+        )
+        self.logging_service.info(
+            f"Application data folder: {self.application_paths.data_root}"
         )
 
         self._recovery_enabled = False
@@ -187,6 +195,10 @@ class MainWindow(QMainWindow):
         voice_layout = QVBoxLayout()
 
         self.voicePanel = VoicePanel()
+        self.voicePanel.settings_service = self.settings_service
+        self.voicePanel.favorite_voices = set(
+            self.settings_service.get_favorite_voices()
+        )
 
         voice_layout.addWidget(self.voicePanel)
         voice_group.setLayout(voice_layout)
@@ -1613,7 +1625,7 @@ class MainWindow(QMainWindow):
         selected_folder = QFileDialog.getExistingDirectory(
             self,
             "Select Output Folder",
-            current_folder or str(self.project_root),
+            current_folder or str(self.application_paths.output),
         )
 
         if selected_folder:
@@ -1623,26 +1635,15 @@ class MainWindow(QMainWindow):
     def _get_projects_folder(self) -> Path | None:
         """Create and return Scriptolator's project folder."""
 
-        projects_folder = self.project_root / "projects"
-
         try:
-            projects_folder.mkdir(
-                parents=True,
-                exist_ok=True,
-            )
-        except OSError as error:
+            return self.project_service.ensure_projects_folder()
+        except RuntimeError as error:
             QMessageBox.critical(
                 self,
                 "Unable to Access Projects Folder",
-                (
-                    "Scriptolator could not create or access the "
-                    "projects folder.\n\n"
-                    f"{error}"
-                ),
+                str(error),
             )
             return None
-
-        return projects_folder
 
     def _save_project(self) -> None:
         """Save the current narration workspace as a project."""
