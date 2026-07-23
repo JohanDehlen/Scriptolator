@@ -20,7 +20,7 @@ from version import APP_NAME, APP_VERSION
 
 
 class AboutDialog(QDialog):
-    """Display Scriptalator version and diagnostic information."""
+    """Display Scriptolator version and diagnostic information."""
 
     COPYRIGHT_TEXT = "© 2026 Johan Dehlen"
 
@@ -170,7 +170,7 @@ class AboutDialog(QDialog):
             self,
             "System Information Copied",
             (
-                "Scriptalator system information was copied "
+                "Scriptolator system information was copied "
                 "to the clipboard."
             ),
         )

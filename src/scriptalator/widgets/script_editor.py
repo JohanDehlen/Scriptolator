@@ -92,7 +92,7 @@ class ScriptTextEdit(QTextEdit):
 
 
 class ScriptEditor(QWidget):
-    """Provide the narration text editor and its existing toolbar."""
+    """Provide the narration script editor and script-only actions."""
 
     script_file_dropped = Signal(str)
 
@@ -103,9 +103,23 @@ class ScriptEditor(QWidget):
 
         toolbar = QHBoxLayout()
 
-        self.openButton = QPushButton("Open")
-        self.saveButton = QPushButton("Save")
-        self.clearButton = QPushButton("Clear")
+        self.openButton = QPushButton("Open Script...")
+        self.openButton.setToolTip(
+            "Open a plain-text or Markdown script into the editor."
+        )
+
+        self.saveButton = QPushButton("Save Script...")
+        self.saveButton.setToolTip(
+            (
+                "Save only the narration script text. "
+                "Voice and output settings are not included."
+            )
+        )
+
+        self.clearButton = QPushButton("Clear Script")
+        self.clearButton.setToolTip(
+            "Remove all text from the narration script editor."
+        )
 
         self.wordLabel = QLabel("Words: 0")
         self.timeLabel = QLabel("Time: 0 sec")
@@ -130,7 +144,7 @@ class ScriptEditor(QWidget):
         )
 
     def update_stats(self) -> None:
-        """Update the existing compact word and time indicators."""
+        """Update the compact word and time indicators."""
 
         text = self.editor.toPlainText()
         words = len(text.split())

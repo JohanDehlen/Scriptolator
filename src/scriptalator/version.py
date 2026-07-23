@@ -1,2 +1,2 @@
-APP_NAME = "Scriptalator"
-APP_VERSION = "0.5.0"
+APP_NAME = "Scriptolator"
+APP_VERSION = "1.0.0"

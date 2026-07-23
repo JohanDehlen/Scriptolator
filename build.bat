@@ -1,19 +1,19 @@
 @echo off
 setlocal
 
-echo Compiling Scriptalator...
+echo Compiling Scriptolator...
 
 .venv\Scripts\python.exe -m compileall -q src\scriptalator
 
 if errorlevel 1 (
     echo.
-    echo Scriptalator compilation failed.
+    echo Scriptolator compilation failed.
     pause
     exit /b 1
 )
 
 echo.
-echo Scriptalator compiled successfully.
+echo Scriptolator compiled successfully.
 pause
 
 endlocal

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import QThread, QUrl, Signal
+from PySide6.QtCore import QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -9,6 +9,7 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtWidgets import (
+    QDialog,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -23,11 +24,17 @@ from PySide6.QtWidgets import (
 from services.edge_tts_service import EdgeTTSService
 from services.profile_service import ProfileService
 from services.project_service import ProjectService
+from services.logging_service import LoggingService
+from services.recovery_service import RecoveryService
 from services.settings_service import SettingsService
 from version import APP_NAME, APP_VERSION
 from widgets.about_dialog import AboutDialog
 from widgets.button_bar import ButtonBar
 from widgets.output_panel import OutputPanel
+from widgets.preferences_dialog import (
+    GeneralPreferences,
+    PreferencesDialog,
+)
 from widgets.script_editor import ScriptEditor
 from widgets.script_statistics import ScriptStatistics
 from widgets.status_bar import StatusBar
@@ -77,7 +84,7 @@ class NarrationGenerationThread(QThread):
 
 
 class MainWindow(QMainWindow):
-    """Main application window for Scriptalator."""
+    """Main application window for Scriptolator."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -93,6 +100,24 @@ class MainWindow(QMainWindow):
         self.profile_service = ProfileService(
             self.project_root
         )
+        self.recovery_service = RecoveryService(
+            self.project_root
+        )
+        self.logging_service = LoggingService(
+            self.project_root
+        )
+        self.logging_service.info(
+            f"{APP_NAME} {APP_VERSION} started."
+        )
+
+        self._recovery_enabled = False
+        self._recovery_timer = QTimer(self)
+        self._recovery_timer.setSingleShot(True)
+        self._recovery_timer.setInterval(2000)
+        self._recovery_timer.timeout.connect(
+            self._save_recovery_snapshot
+        )
+
         self._applying_profile = False
         self._loaded_profile_data: dict[str, object] | None = None
 
@@ -187,11 +212,131 @@ class MainWindow(QMainWindow):
         self._update_script_statistics()
         self._update_window_title()
         self._restore_window_state()
+        self._handle_startup_recovery()
+        self._recovery_enabled = True
+        self._schedule_recovery_save()
 
         self.scriptEditor.editor.setFocus()
 
+    def _handle_startup_recovery(self) -> None:
+        """Offer to restore work left by an unclean shutdown."""
+
+        if not self.recovery_service.has_recovery():
+            return
+
+        message_box = QMessageBox(self)
+        message_box.setIcon(
+            QMessageBox.Icon.Warning
+        )
+        message_box.setWindowTitle(
+            "Unsaved Recovery Found"
+        )
+        message_box.setText(
+            "Scriptolator found work that was not closed normally."
+        )
+        message_box.setInformativeText(
+            "Restore the recovered project or discard it?"
+        )
+
+        restore_button = message_box.addButton(
+            "Restore",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        discard_button = message_box.addButton(
+            "Discard",
+            QMessageBox.ButtonRole.DestructiveRole,
+        )
+        message_box.setDefaultButton(restore_button)
+        message_box.exec()
+
+        if message_box.clickedButton() is discard_button:
+            self.logging_service.info(
+                "Recovery data discarded by the user."
+            )
+
+            try:
+                self.recovery_service.discard_recovery()
+            except RuntimeError as error:
+                QMessageBox.warning(
+                    self,
+                    "Unable to Discard Recovery",
+                    str(error),
+                )
+            return
+
+        try:
+            project_data, project_path = (
+                self.recovery_service.load_recovery()
+            )
+        except (
+            FileNotFoundError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as error:
+            QMessageBox.critical(
+                self,
+                "Unable to Restore Recovery",
+                str(error),
+            )
+            return
+
+        self._apply_project_data(project_data)
+        self.current_project_path = project_path
+        self.last_generated_path = None
+        self._update_window_title()
+        self._update_script_statistics()
+
+        self.statusBarWidget.setText(
+            "Recovered unsaved work successfully."
+        )
+        self.logging_service.info(
+            "Unsaved recovery data restored successfully."
+        )
+
+    def _schedule_recovery_save(self, *args: object) -> None:
+        """Save recovery data after a short period of inactivity."""
+
+        del args
+
+        if not self._recovery_enabled:
+            return
+
+        self._recovery_timer.start()
+
+    def _save_recovery_snapshot(self) -> None:
+        """Write the current project state to the recovery file."""
+
+        if not self._recovery_enabled:
+            return
+
+        project_data = self._collect_project_data()
+        script_text = str(project_data["script"]).strip()
+
+        if not script_text and self.current_project_path is None:
+            try:
+                self.recovery_service.discard_recovery()
+            except RuntimeError:
+                pass
+            return
+
+        try:
+            self.recovery_service.save_recovery(
+                project_data=project_data,
+                current_project_path=self.current_project_path,
+            )
+        except (
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ):
+            return
+
     def _restore_window_state(self) -> None:
         """Restore the saved window size, position, and state."""
+
+        if not self.settings_service.get_restore_window_state():
+            return
 
         saved_geometry = (
             self.settings_service.get_window_geometry()
@@ -358,8 +503,18 @@ class MainWindow(QMainWindow):
             self._open_profiles_folder
         )
 
+        self.preferencesAction = QAction(
+            "&Preferences...",
+            self,
+        )
+        self.preferencesAction.triggered.connect(
+            self._show_preferences_dialog
+        )
+
         tools_menu.addAction(self.openOutputFolderAction)
         tools_menu.addAction(self.openProfilesFolderAction)
+        tools_menu.addSeparator()
+        tools_menu.addAction(self.preferencesAction)
 
         help_menu = self.menuBar().addMenu("&Help")
 
@@ -433,6 +588,39 @@ class MainWindow(QMainWindow):
             "Recent projects cleared."
         )
 
+    def _show_preferences_dialog(self) -> None:
+        """Show and save general application preferences."""
+
+        current_preferences = GeneralPreferences(
+            restore_window_state=(
+                self.settings_service.get_restore_window_state()
+            ),
+            confirm_before_clearing=(
+                self.settings_service.get_confirm_before_clearing()
+            ),
+        )
+
+        dialog = PreferencesDialog(
+            preferences=current_preferences,
+            parent=self,
+        )
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        preferences = dialog.preferences()
+
+        self.settings_service.set_restore_window_state(
+            preferences.restore_window_state
+        )
+        self.settings_service.set_confirm_before_clearing(
+            preferences.confirm_before_clearing
+        )
+
+        self.statusBarWidget.setText(
+            "Preferences saved successfully."
+        )
+
     def _show_about_dialog(self) -> None:
         """Show current application and system information."""
 
@@ -490,7 +678,8 @@ class MainWindow(QMainWindow):
         output_folder = self.settings_service.get_output_folder()
 
         self.outputPanel.folder.setText(str(output_folder))
-        self.outputPanel.filename.clear()
+        self.outputPanel.clear_filename()
+        self.outputPanel.suggest_filename("Untitled.mp3")
 
     def _save_voice_preferences(self) -> None:
         """Store the current narration preferences."""
@@ -556,6 +745,16 @@ class MainWindow(QMainWindow):
             self._clear_project
         )
 
+        self.scriptEditor.openButton.clicked.connect(
+            self._open_script
+        )
+        self.scriptEditor.saveButton.clicked.connect(
+            self._save_script
+        )
+        self.scriptEditor.clearButton.clicked.connect(
+            self._clear_script
+        )
+
         self.voicePanel.languageFilter.currentIndexChanged.connect(
             self._save_voice_preferences
         )
@@ -576,6 +775,32 @@ class MainWindow(QMainWindow):
         )
         self.scriptEditor.editor.textChanged.connect(
             self._update_script_statistics
+        )
+        self.scriptEditor.editor.textChanged.connect(
+            self._schedule_recovery_save
+        )
+
+        self.outputPanel.folder.textChanged.connect(
+            self._schedule_recovery_save
+        )
+        self.outputPanel.filename.textChanged.connect(
+            self._schedule_recovery_save
+        )
+
+        self.voicePanel.languageFilter.currentIndexChanged.connect(
+            self._schedule_recovery_save
+        )
+        self.voicePanel.voiceCombo.currentIndexChanged.connect(
+            self._schedule_recovery_save
+        )
+        self.voicePanel.speedSlider.valueChanged.connect(
+            self._schedule_recovery_save
+        )
+        self.voicePanel.pitchSlider.valueChanged.connect(
+            self._schedule_recovery_save
+        )
+        self.voicePanel.volumeSlider.valueChanged.connect(
+            self._schedule_recovery_save
         )
         self.scriptEditor.script_file_dropped.connect(
             self._load_dropped_script_file
@@ -991,7 +1216,13 @@ class MainWindow(QMainWindow):
         )
 
     def _get_preview_text(self) -> str:
-        """Return the first suitable sentence from the current script."""
+        """Return selected script text or a short script preview."""
+
+        text_cursor = self.scriptEditor.editor.textCursor()
+        selected_text = text_cursor.selectedText().strip()
+
+        if selected_text:
+            return selected_text.replace("\u2029", "\n")
 
         text = self.scriptEditor.editor.toPlainText().strip()
 
@@ -1021,31 +1252,173 @@ class MainWindow(QMainWindow):
             speed_adjustment=self.voicePanel.speedSlider.value(),
         )
 
-    def _load_dropped_script_file(
-        self,
-        file_path: str,
-    ) -> None:
-        """Load a dropped .txt or .md file into the script editor."""
+    def _open_script(self) -> None:
+        """Choose and load a plain-text or Markdown script."""
 
-        script_path = Path(file_path)
+        open_folder = (
+            self.settings_service.get_last_script_open_folder()
+        )
 
-        if not script_path.is_file():
+        selected_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Narration Script",
+            str(open_folder),
+            (
+                "Narration Scripts (*.txt *.md);;"
+                "Text Files (*.txt);;"
+                "Markdown Files (*.md)"
+            ),
+        )
+
+        if not selected_path:
+            return
+
+        script_path = Path(selected_path).expanduser()
+
+        self.settings_service.set_last_script_open_folder(
+            script_path.parent
+        )
+        self._load_script_path(script_path)
+
+    def _save_script(self) -> None:
+        """Save only the current narration script text."""
+
+        script_text = self.scriptEditor.editor.toPlainText()
+
+        if not script_text.strip():
             QMessageBox.warning(
                 self,
-                "Script File Not Found",
+                "No Script to Save",
+                "Enter or open a narration script before saving it.",
+            )
+            return
+
+        suggested_name = "narration-script.txt"
+
+        if self.current_project_path is not None:
+            suggested_name = (
+                f"{self.current_project_path.stem}.txt"
+            )
+
+        save_folder = (
+            self.settings_service.get_last_script_save_folder()
+        )
+
+        selected_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Narration Script",
+            str(save_folder / suggested_name),
+            (
+                "Text Files (*.txt);;"
+                "Markdown Files (*.md)"
+            ),
+        )
+
+        if not selected_path:
+            return
+
+        script_path = Path(selected_path).expanduser()
+
+        if script_path.suffix.lower() not in {".txt", ".md"}:
+            script_path = script_path.with_suffix(".txt")
+
+        try:
+            script_path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            script_path.write_text(
+                script_text,
+                encoding="utf-8",
+            )
+        except OSError as error:
+            QMessageBox.critical(
+                self,
+                "Unable to Save Script",
                 (
-                    "The dropped script file could not be found.\n\n"
-                    f"{script_path}"
+                    "Scriptolator could not save the narration "
+                    "script.\n\n"
+                    f"{error}"
                 ),
             )
             return
 
-        if script_path.suffix.lower() not in {".txt", ".md"}:
+        self.settings_service.set_last_script_save_folder(
+            script_path.parent
+        )
+
+        self.statusBarWidget.setText(
+            f"Script saved: {script_path.name}"
+        )
+        self.logging_service.info(
+            f"Script saved: {script_path}"
+        )
+
+        QMessageBox.information(
+            self,
+            "Script Saved",
+            (
+                "The narration script was saved successfully.\n\n"
+                f"{script_path}"
+            ),
+        )
+
+    def _clear_script(self) -> None:
+        """Clear only the narration script editor."""
+
+        script_text = self.scriptEditor.editor.toPlainText()
+
+        if not script_text:
+            self.scriptEditor.editor.setFocus()
+            return
+
+        if self.settings_service.get_confirm_before_clearing():
+            response = QMessageBox.question(
+                self,
+                "Clear Narration Script?",
+                (
+                    "This will remove all text from the narration "
+                    "script editor.\n\n"
+                    "The project voice and output settings will remain."
+                ),
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+
+            if response != QMessageBox.StandardButton.Yes:
+                return
+
+        self.scriptEditor.editor.clear()
+        self.last_generated_path = None
+        self._update_script_statistics()
+        self.statusBarWidget.setText(
+            "Narration script cleared."
+        )
+        self.scriptEditor.editor.setFocus()
+
+    def _load_script_path(self, script_path: Path) -> None:
+        """Load one supported script file into the editor."""
+
+        normalized_path = Path(script_path).expanduser()
+
+        if not normalized_path.is_file():
+            QMessageBox.warning(
+                self,
+                "Script File Not Found",
+                (
+                    "The narration script could not be found.\n\n"
+                    f"{normalized_path}"
+                ),
+            )
+            return
+
+        if normalized_path.suffix.lower() not in {".txt", ".md"}:
             QMessageBox.warning(
                 self,
                 "Unsupported Script File",
                 (
-                    "Scriptalator can currently load only .txt "
+                    "Scriptolator can currently load only .txt "
                     "and .md files."
                 ),
             )
@@ -1060,9 +1433,9 @@ class MainWindow(QMainWindow):
                 self,
                 "Replace Current Script?",
                 (
-                    "The current script contains text.\n\n"
+                    "The current narration script contains text.\n\n"
                     "Replace it with:\n"
-                    f"{script_path.name}?"
+                    f"{normalized_path.name}?"
                 ),
                 QMessageBox.StandardButton.Yes
                 | QMessageBox.StandardButton.No,
@@ -1071,17 +1444,17 @@ class MainWindow(QMainWindow):
 
             if response != QMessageBox.StandardButton.Yes:
                 self.statusBarWidget.setText(
-                    "Dropped script was not loaded."
+                    "Narration script was not loaded."
                 )
                 return
 
         try:
-            script_text = script_path.read_text(
+            script_text = normalized_path.read_text(
                 encoding="utf-8-sig"
             )
         except UnicodeDecodeError:
             try:
-                script_text = script_path.read_text(
+                script_text = normalized_path.read_text(
                     encoding="cp1252"
                 )
             except (OSError, UnicodeDecodeError) as error:
@@ -1089,7 +1462,8 @@ class MainWindow(QMainWindow):
                     self,
                     "Unable to Load Script",
                     (
-                        "Scriptalator could not read the dropped file.\n\n"
+                        "Scriptolator could not read the narration "
+                        "script.\n\n"
                         f"{error}"
                     ),
                 )
@@ -1099,7 +1473,8 @@ class MainWindow(QMainWindow):
                 self,
                 "Unable to Load Script",
                 (
-                    "Scriptalator could not read the dropped file.\n\n"
+                    "Scriptolator could not read the narration "
+                    "script.\n\n"
                     f"{error}"
                 ),
             )
@@ -1112,9 +1487,20 @@ class MainWindow(QMainWindow):
         self._update_script_statistics()
 
         self.statusBarWidget.setText(
-            f"Loaded script: {script_path.name}"
+            f"Loaded script: {normalized_path.name}"
+        )
+        self.logging_service.info(
+            f"Script loaded: {normalized_path}"
         )
         self.scriptEditor.editor.setFocus()
+
+    def _load_dropped_script_file(
+        self,
+        file_path: str,
+    ) -> None:
+        """Load a dropped .txt or .md file into the script editor."""
+
+        self._load_script_path(Path(file_path))
 
     def _select_output_folder(self) -> None:
         """Allow the user to select the narration output folder."""
@@ -1132,7 +1518,7 @@ class MainWindow(QMainWindow):
             self._save_output_folder()
 
     def _get_projects_folder(self) -> Path | None:
-        """Create and return Scriptalator's project folder."""
+        """Create and return Scriptolator's project folder."""
 
         projects_folder = self.project_root / "projects"
 
@@ -1146,7 +1532,7 @@ class MainWindow(QMainWindow):
                 self,
                 "Unable to Access Projects Folder",
                 (
-                    "Scriptalator could not create or access the "
+                    "Scriptolator could not create or access the "
                     "projects folder.\n\n"
                     f"{error}"
                 ),
@@ -1166,17 +1552,17 @@ class MainWindow(QMainWindow):
         suggested_name = (
             self.current_project_path.name
             if self.current_project_path is not None
-            else "untitled.scriptalator"
+            else "untitled.scriptolator"
         )
 
         initial_path = projects_folder / suggested_name
 
         selected_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Save Scriptalator Project",
+            "Save Scriptolator Project",
             str(initial_path),
             (
-                "Scriptalator Projects "
+                "Scriptolator Projects "
                 f"(*{ProjectService.FILE_EXTENSION})"
             ),
         )
@@ -1184,11 +1570,21 @@ class MainWindow(QMainWindow):
         if not selected_path:
             return
 
+        normalized_selected_path = (
+            ProjectService.normalize_project_path(
+                Path(selected_path)
+            )
+        )
+
+        self.outputPanel.suggest_filename(
+            f"{normalized_selected_path.stem}.mp3"
+        )
+
         project_data = self._collect_project_data()
 
         try:
             saved_path = ProjectService.save_project(
-                Path(selected_path),
+                normalized_selected_path,
                 project_data,
             )
         except (OSError, RuntimeError, TypeError, ValueError) as error:
@@ -1207,18 +1603,21 @@ class MainWindow(QMainWindow):
         self.statusBarWidget.setText(
             f"Project saved: {saved_path}"
         )
+        self.logging_service.info(
+            f"Project saved: {saved_path}"
+        )
 
         QMessageBox.information(
             self,
             "Project Saved",
             (
-                "Scriptalator project saved successfully:\n\n"
+                "Scriptolator project saved successfully:\n\n"
                 f"{saved_path}"
             ),
         )
 
     def _load_project(self) -> None:
-        """Choose and load a Scriptalator project."""
+        """Choose and load a Scriptolator project."""
 
         projects_folder = self._get_projects_folder()
 
@@ -1227,11 +1626,12 @@ class MainWindow(QMainWindow):
 
         selected_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Load Scriptalator Project",
+            "Load Scriptolator Project",
             str(projects_folder),
             (
-                "Scriptalator Projects "
-                f"(*{ProjectService.FILE_EXTENSION})"
+                "Scriptolator Projects "
+                f"(*{ProjectService.FILE_EXTENSION} "
+                f"*{ProjectService.LEGACY_FILE_EXTENSION})"
             ),
         )
 
@@ -1300,12 +1700,15 @@ class MainWindow(QMainWindow):
         self.statusBarWidget.setText(
             f"Project loaded: {self.current_project_path}"
         )
+        self.logging_service.info(
+            f"Project loaded: {self.current_project_path}"
+        )
 
         QMessageBox.information(
             self,
             "Project Loaded",
             (
-                "Scriptalator project loaded successfully:\n\n"
+                "Scriptolator project loaded successfully:\n\n"
                 f"{self.current_project_path}"
             ),
         )
@@ -1369,7 +1772,10 @@ class MainWindow(QMainWindow):
         self.voicePanel.pitchSlider.setValue(pitch)
         self.voicePanel.volumeSlider.setValue(volume)
         self.outputPanel.folder.setText(output_folder)
-        self.outputPanel.filename.setText(output_filename)
+        self.outputPanel.set_filename(
+            output_filename,
+            user_defined=bool(output_filename.strip()),
+        )
 
         self.scriptEditor.editor.setFocus()
 
@@ -1381,7 +1787,10 @@ class MainWindow(QMainWindow):
             or self.outputPanel.filename.text().strip()
         )
 
-        if has_content:
+        if (
+            has_content
+            and self.settings_service.get_confirm_before_clearing()
+        ):
             response = QMessageBox.question(
                 self,
                 "Clear Current Project?",
@@ -1399,7 +1808,8 @@ class MainWindow(QMainWindow):
                 return
 
         self.scriptEditor.editor.clear()
-        self.outputPanel.filename.clear()
+        self.outputPanel.clear_filename()
+        self.outputPanel.suggest_filename("Untitled.mp3")
 
         self.current_project_path = None
         self.last_generated_path = None
@@ -1433,7 +1843,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "Narration In Progress",
-                "Scriptalator is already generating narration.",
+                "Scriptolator is already generating narration.",
             )
             return
 
@@ -1505,8 +1915,15 @@ class MainWindow(QMainWindow):
             self.generation_thread.deleteLater
         )
 
+        self.buttonBar.generate.show_generating_state()
         self._set_generation_controls_enabled(False)
         self.statusBarWidget.setText("Generating narration...")
+        self.logging_service.info(
+            (
+                "Narration generation started: "
+                f"voice={voice}, output={output_path}"
+            )
+        )
 
         self.generation_thread.start()
 
@@ -1514,9 +1931,13 @@ class MainWindow(QMainWindow):
         """Handle successful narration generation."""
 
         self.last_generated_path = Path(generated_path)
+        self.buttonBar.generate.show_complete_state()
 
         self.statusBarWidget.setText(
             f"Narration saved: {generated_path}"
+        )
+        self.logging_service.info(
+            f"Narration generated successfully: {generated_path}"
         )
 
         QMessageBox.information(
@@ -1534,20 +1955,25 @@ class MainWindow(QMainWindow):
     ) -> None:
         """Handle narration generation failure."""
 
+        self.buttonBar.generate.show_error_state()
+
         self.statusBarWidget.setText(
             "Narration generation failed."
+        )
+        self.logging_service.error(
+            f"Narration generation failed: {error_message}"
         )
 
         if "Permission denied" in error_message:
             user_message = (
-                "Scriptalator could not replace the output file.\n\n"
+                "Scriptolator could not replace the output file.\n\n"
                 "The MP3 may currently be open in another application. "
                 "Close the audio player or choose a different filename.\n\n"
                 f"Technical details:\n{error_message}"
             )
         else:
             user_message = (
-                "Scriptalator could not generate the narration.\n\n"
+                "Scriptolator could not generate the narration.\n\n"
                 f"{error_message}"
             )
 
@@ -1569,7 +1995,6 @@ class MainWindow(QMainWindow):
     ) -> None:
         """Enable or disable controls that affect generation."""
 
-        self.buttonBar.generate.setEnabled(enabled)
         self.buttonBar.save.setEnabled(enabled)
         self.buttonBar.load.setEnabled(enabled)
         self.buttonBar.clear.setEnabled(enabled)
@@ -1713,7 +2138,7 @@ class MainWindow(QMainWindow):
                 self,
                 "Narration In Progress",
                 (
-                    "Scriptalator is still generating narration.\n\n"
+                    "Scriptolator is still generating narration.\n\n"
                     "Wait for generation to finish before closing."
                 ),
             )
@@ -1730,26 +2155,76 @@ class MainWindow(QMainWindow):
                 self,
                 "Preview In Progress",
                 (
-                    "Scriptalator is still generating a voice preview.\n\n"
+                    "Scriptolator is still generating a voice preview.\n\n"
                     "Wait for the preview to finish before closing."
                 ),
             )
             event.ignore()
             return
 
+        self._recovery_timer.stop()
+        self._recovery_enabled = False
         self._save_window_state()
+
+        try:
+            self.recovery_service.discard_recovery()
+        except RuntimeError as error:
+            QMessageBox.warning(
+                self,
+                "Unable to Clear Recovery",
+                str(error),
+            )
+
+        self.logging_service.info(
+            f"{APP_NAME} closed normally."
+        )
         event.accept()
 
     @staticmethod
     def _normalize_mp3_filename(filename: str) -> str:
-        """Add the MP3 extension when the entered filename lacks it."""
+        """Return a Windows-safe MP3 filename."""
 
-        normalized_filename = filename.strip()
+        entered_name = filename.strip()
 
-        if normalized_filename.lower().endswith(".mp3"):
-            return normalized_filename
+        if entered_name.casefold().endswith(".mp3"):
+            entered_name = entered_name[:-4]
 
-        return f"{normalized_filename}.mp3"
+        sanitized_characters: list[str] = []
+
+        for character in entered_name:
+            if ord(character) < 32:
+                sanitized_characters.append(" ")
+                continue
+
+            if character in '<>:"/\\|?*':
+                sanitized_characters.append("-")
+                continue
+
+            sanitized_characters.append(character)
+
+        sanitized_stem = "".join(sanitized_characters)
+
+        while "  " in sanitized_stem:
+            sanitized_stem = sanitized_stem.replace("  ", " ")
+
+        sanitized_stem = sanitized_stem.strip(" .")
+
+        reserved_names = {
+            "con",
+            "prn",
+            "aux",
+            "nul",
+            *(f"com{number}" for number in range(1, 10)),
+            *(f"lpt{number}" for number in range(1, 10)),
+        }
+
+        if sanitized_stem.casefold() in reserved_names:
+            sanitized_stem = f"{sanitized_stem}-narration"
+
+        if not sanitized_stem:
+            sanitized_stem = "Untitled"
+
+        return f"{sanitized_stem}.mp3"
 
     @staticmethod
     def _is_valid_voice(voice: str) -> bool:

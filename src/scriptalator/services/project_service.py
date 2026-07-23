@@ -4,10 +4,13 @@ from typing import Any
 
 
 class ProjectService:
-    """Save and load Scriptalator project files."""
+    """Save and load Scriptolator project files."""
 
-    FILE_EXTENSION = ".scriptalator"
-    FORMAT_NAME = "Scriptalator Project"
+    FILE_EXTENSION = ".scriptolator"
+    LEGACY_FILE_EXTENSION = ".scriptalator"
+
+    FORMAT_NAME = "Scriptolator Project"
+    LEGACY_FORMAT_NAME = "Scriptalator Project"
     FORMAT_VERSION = 1
 
     REQUIRED_FIELDS = {
@@ -27,7 +30,7 @@ class ProjectService:
         project_path: Path,
         project_data: dict[str, Any],
     ) -> Path:
-        """Write project data to a Scriptalator project file."""
+        """Write project data to a Scriptolator project file."""
 
         normalized_path = cls.normalize_project_path(project_path)
         validated_data = cls.validate_project_data(project_data)
@@ -38,13 +41,20 @@ class ProjectService:
             "project": validated_data,
         }
 
+        temporary_path = normalized_path.with_suffix(
+            normalized_path.suffix + ".tmp"
+        )
+        backup_path = normalized_path.with_suffix(
+            normalized_path.suffix + ".bak"
+        )
+
         try:
             normalized_path.parent.mkdir(
                 parents=True,
                 exist_ok=True,
             )
 
-            normalized_path.write_text(
+            temporary_path.write_text(
                 json.dumps(
                     file_data,
                     indent=4,
@@ -52,7 +62,19 @@ class ProjectService:
                 ),
                 encoding="utf-8",
             )
+
+            if normalized_path.is_file():
+                backup_path.write_bytes(
+                    normalized_path.read_bytes()
+                )
+
+            temporary_path.replace(normalized_path)
         except OSError as error:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
             raise RuntimeError(
                 f"Unable to save the project:\n{error}"
             ) from error
@@ -62,14 +84,27 @@ class ProjectService:
                 "The project file was not created."
             )
 
-        return normalized_path
+        return normalized_path.resolve()
+
+    @classmethod
+    def get_backup_path(
+        cls,
+        project_path: Path,
+    ) -> Path:
+        """Return the automatic backup path for a project."""
+
+        normalized_path = cls.normalize_project_path(project_path)
+
+        return normalized_path.with_suffix(
+            normalized_path.suffix + ".bak"
+        )
 
     @classmethod
     def load_project(
         cls,
         project_path: Path,
     ) -> dict[str, Any]:
-        """Read and validate a Scriptalator project file."""
+        """Read and validate a Scriptolator or legacy project file."""
 
         normalized_path = Path(project_path).expanduser()
 
@@ -96,12 +131,17 @@ class ProjectService:
 
         if not isinstance(file_data, dict):
             raise ValueError(
-                "The selected file is not a valid Scriptalator project."
+                "The selected file is not a valid Scriptolator project."
             )
 
-        if file_data.get("format") != cls.FORMAT_NAME:
+        format_name = file_data.get("format")
+
+        if format_name not in {
+            cls.FORMAT_NAME,
+            cls.LEGACY_FORMAT_NAME,
+        }:
             raise ValueError(
-                "The selected file is not a Scriptalator project."
+                "The selected file is not a Scriptolator project."
             )
 
         format_version = file_data.get("format_version")
@@ -125,18 +165,36 @@ class ProjectService:
         cls,
         project_path: Path,
     ) -> Path:
-        """Add the Scriptalator extension when it is missing."""
+        """Return a project path using the Scriptolator extension."""
 
         normalized_path = Path(project_path).expanduser()
+        lower_name = normalized_path.name.lower()
 
-        if normalized_path.name.lower().endswith(
-            cls.FILE_EXTENSION
-        ):
+        if lower_name.endswith(cls.FILE_EXTENSION):
             return normalized_path
+
+        if lower_name.endswith(cls.LEGACY_FILE_EXTENSION):
+            return normalized_path.with_suffix(
+                cls.FILE_EXTENSION
+            )
 
         return normalized_path.with_name(
             normalized_path.name + cls.FILE_EXTENSION
         )
+
+    @classmethod
+    def is_supported_project_path(
+        cls,
+        project_path: Path,
+    ) -> bool:
+        """Return whether a path uses a supported project extension."""
+
+        suffix = Path(project_path).suffix.lower()
+
+        return suffix in {
+            cls.FILE_EXTENSION,
+            cls.LEGACY_FILE_EXTENSION,
+        }
 
     @classmethod
     def validate_project_data(
@@ -158,6 +216,7 @@ class ProjectService:
             missing_list = ", ".join(
                 sorted(missing_fields)
             )
+
             raise ValueError(
                 f"Project data is missing: {missing_list}"
             )

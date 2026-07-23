@@ -1,0 +1,14 @@
+{
+    "format": "Scriptolator Project",
+    "format_version": 1,
+    "project": {
+        "script": "",
+        "language": "en-IE",
+        "voice": "en-IE-EmilyNeural",
+        "speed": 36,
+        "pitch": -9,
+        "volume": 100,
+        "output_folder": "C:\\Projects\\Scriptalator\\output",
+        "output_filename": ""
+    }
+}

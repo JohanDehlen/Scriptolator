@@ -7,8 +7,9 @@ class SettingsService:
     """Store and retrieve Scriptalator application preferences."""
 
     ORGANIZATION_NAME = "JohanDehlen"
-    APPLICATION_NAME = "Scriptalator"
-    PREVIOUS_APPLICATION_NAME = "Voiceanator"
+    APPLICATION_NAME = "Scriptolator"
+    PREVIOUS_APPLICATION_NAME = "Scriptalator"
+    LEGACY_APPLICATION_NAME = "Voiceanator"
 
     VOICE_KEY = "narration/last_voice"
     LANGUAGE_KEY = "narration/last_language"
@@ -19,11 +20,20 @@ class SettingsService:
     LAST_PROFILE_KEY = "narration/last_profile"
     RECENT_PROJECTS_KEY = "projects/recent"
     OUTPUT_FOLDER_KEY = "output/last_folder"
+    LAST_SCRIPT_OPEN_FOLDER_KEY = "scripts/last_open_folder"
+    LAST_SCRIPT_SAVE_FOLDER_KEY = "scripts/last_save_folder"
     WINDOW_GEOMETRY_KEY = "window/geometry"
     WINDOW_STATE_KEY = "window/state"
+    RESTORE_WINDOW_STATE_KEY = "preferences/restore_window_state"
+    RESTORE_LAST_PROFILE_KEY = "preferences/restore_last_profile"
+    RESTORE_OUTPUT_FOLDER_KEY = "preferences/restore_output_folder"
+    CONFIRM_BEFORE_CLEARING_KEY = "preferences/confirm_before_clearing"
 
     LEGACY_OUTPUT_FILENAME_KEY = "output/last_filename"
-    MIGRATION_COMPLETE_KEY = (
+    SCRIPTALATOR_MIGRATION_KEY = (
+        "application/scriptalator_settings_migrated"
+    )
+    VOICEANATOR_MIGRATION_KEY = (
         "application/voiceanator_settings_migrated"
     )
 
@@ -34,6 +44,10 @@ class SettingsService:
     DEFAULT_VOLUME = 100
     DEFAULT_PROFILE = ""
     MAX_RECENT_PROJECTS = 10
+    DEFAULT_RESTORE_WINDOW_STATE = True
+    DEFAULT_RESTORE_LAST_PROFILE = True
+    DEFAULT_RESTORE_OUTPUT_FOLDER = True
+    DEFAULT_CONFIRM_BEFORE_CLEARING = True
 
     def __init__(self, project_root: Path) -> None:
         self.project_root = Path(project_root)
@@ -43,8 +57,91 @@ class SettingsService:
             self.APPLICATION_NAME,
         )
 
-        self._migrate_previous_settings()
+        self._migrate_scriptalator_settings()
+        self._migrate_voiceanator_settings()
         self._remove_legacy_filename_setting()
+
+    def get_restore_window_state(self) -> bool:
+        """Return whether window geometry should be restored."""
+
+        return self.settings.value(
+            self.RESTORE_WINDOW_STATE_KEY,
+            self.DEFAULT_RESTORE_WINDOW_STATE,
+            type=bool,
+        )
+
+    def set_restore_window_state(self, enabled: bool) -> None:
+        """Store whether window geometry should be restored."""
+
+        self._set_boolean(
+            self.RESTORE_WINDOW_STATE_KEY,
+            enabled,
+        )
+
+    def get_restore_last_profile(self) -> bool:
+        """Return whether the last narration profile should load."""
+
+        return self.settings.value(
+            self.RESTORE_LAST_PROFILE_KEY,
+            self.DEFAULT_RESTORE_LAST_PROFILE,
+            type=bool,
+        )
+
+    def set_restore_last_profile(self, enabled: bool) -> None:
+        """Store whether the last narration profile should load."""
+
+        self._set_boolean(
+            self.RESTORE_LAST_PROFILE_KEY,
+            enabled,
+        )
+
+    def get_restore_output_folder(self) -> bool:
+        """Return whether the last output folder should load."""
+
+        return self.settings.value(
+            self.RESTORE_OUTPUT_FOLDER_KEY,
+            self.DEFAULT_RESTORE_OUTPUT_FOLDER,
+            type=bool,
+        )
+
+    def set_restore_output_folder(self, enabled: bool) -> None:
+        """Store whether the last output folder should load."""
+
+        self._set_boolean(
+            self.RESTORE_OUTPUT_FOLDER_KEY,
+            enabled,
+        )
+
+    def get_confirm_before_clearing(self) -> bool:
+        """Return whether clearing a project requires confirmation."""
+
+        return self.settings.value(
+            self.CONFIRM_BEFORE_CLEARING_KEY,
+            self.DEFAULT_CONFIRM_BEFORE_CLEARING,
+            type=bool,
+        )
+
+    def set_confirm_before_clearing(self, enabled: bool) -> None:
+        """Store whether clearing a project requires confirmation."""
+
+        self._set_boolean(
+            self.CONFIRM_BEFORE_CLEARING_KEY,
+            enabled,
+        )
+
+    def save_general_preferences(
+        self,
+        restore_window_state: bool,
+        restore_last_profile: bool,
+        restore_output_folder: bool,
+        confirm_before_clearing: bool,
+    ) -> None:
+        """Store all general preferences together."""
+
+        self.set_restore_window_state(restore_window_state)
+        self.set_restore_last_profile(restore_last_profile)
+        self.set_restore_output_folder(restore_output_folder)
+        self.set_confirm_before_clearing(confirm_before_clearing)
 
     def get_window_geometry(self) -> QByteArray:
         """Return the saved main-window geometry."""
@@ -464,6 +561,64 @@ class SettingsService:
             maximum=100,
         )
 
+    def get_last_script_open_folder(self) -> Path:
+        """Return the last folder used to open a script."""
+
+        default_folder = self.project_root
+
+        saved_folder = self.settings.value(
+            self.LAST_SCRIPT_OPEN_FOLDER_KEY,
+            str(default_folder),
+            type=str,
+        ).strip()
+
+        folder_path = Path(saved_folder).expanduser()
+
+        if not folder_path.is_dir():
+            folder_path = default_folder
+
+        return folder_path
+
+    def set_last_script_open_folder(
+        self,
+        folder_path: Path | str,
+    ) -> None:
+        """Store the last folder used to open a script."""
+
+        self._set_existing_folder(
+            key=self.LAST_SCRIPT_OPEN_FOLDER_KEY,
+            folder_path=folder_path,
+        )
+
+    def get_last_script_save_folder(self) -> Path:
+        """Return the last folder used to save a script."""
+
+        default_folder = self.get_last_script_open_folder()
+
+        saved_folder = self.settings.value(
+            self.LAST_SCRIPT_SAVE_FOLDER_KEY,
+            str(default_folder),
+            type=str,
+        ).strip()
+
+        folder_path = Path(saved_folder).expanduser()
+
+        if not folder_path.is_dir():
+            folder_path = default_folder
+
+        return folder_path
+
+    def set_last_script_save_folder(
+        self,
+        folder_path: Path | str,
+    ) -> None:
+        """Store the last folder used to save a script."""
+
+        self._set_existing_folder(
+            key=self.LAST_SCRIPT_SAVE_FOLDER_KEY,
+            folder_path=folder_path,
+        )
+
     def get_output_folder(self) -> Path:
         """Return the saved output folder."""
 
@@ -519,11 +674,11 @@ class SettingsService:
         self.set_pitch(pitch)
         self.set_volume(volume)
 
-    def _migrate_previous_settings(self) -> None:
-        """Copy relevant Voiceanator settings into Scriptalator once."""
+    def _migrate_scriptalator_settings(self) -> None:
+        """Copy Scriptalator settings into Scriptolator once."""
 
         migration_complete = self.settings.value(
-            self.MIGRATION_COMPLETE_KEY,
+            self.SCRIPTALATOR_MIGRATION_KEY,
             False,
             type=bool,
         )
@@ -538,7 +693,16 @@ class SettingsService:
 
         migration_keys = (
             self.VOICE_KEY,
+            self.LANGUAGE_KEY,
+            self.SPEED_KEY,
+            self.PITCH_KEY,
+            self.VOLUME_KEY,
+            self.FAVORITE_VOICES_KEY,
+            self.LAST_PROFILE_KEY,
+            self.RECENT_PROJECTS_KEY,
             self.OUTPUT_FOLDER_KEY,
+            self.WINDOW_GEOMETRY_KEY,
+            self.WINDOW_STATE_KEY,
         )
 
         for key in migration_keys:
@@ -554,7 +718,47 @@ class SettingsService:
             )
 
         self.settings.setValue(
-            self.MIGRATION_COMPLETE_KEY,
+            self.SCRIPTALATOR_MIGRATION_KEY,
+            True,
+        )
+        self.settings.sync()
+
+    def _migrate_voiceanator_settings(self) -> None:
+        """Copy any remaining Voiceanator settings once."""
+
+        migration_complete = self.settings.value(
+            self.VOICEANATOR_MIGRATION_KEY,
+            False,
+            type=bool,
+        )
+
+        if migration_complete:
+            return
+
+        legacy_settings = QSettings(
+            self.ORGANIZATION_NAME,
+            self.LEGACY_APPLICATION_NAME,
+        )
+
+        migration_keys = (
+            self.VOICE_KEY,
+            self.OUTPUT_FOLDER_KEY,
+        )
+
+        for key in migration_keys:
+            if self.settings.contains(key):
+                continue
+
+            if not legacy_settings.contains(key):
+                continue
+
+            self.settings.setValue(
+                key,
+                legacy_settings.value(key),
+            )
+
+        self.settings.setValue(
+            self.VOICEANATOR_MIGRATION_KEY,
             True,
         )
         self.settings.sync()
@@ -577,19 +781,26 @@ class SettingsService:
         saved_folder: str,
         default_output_folder: Path,
     ) -> Path:
-        """Resolve the output folder after the application rename."""
+        """Resolve the output folder after application renames."""
 
         if not saved_folder:
             return default_output_folder
 
         saved_path = Path(saved_folder).expanduser()
 
-        is_voiceanator_output = (
-            saved_path.name.lower() == "output"
-            and saved_path.parent.name.lower() == "voiceanator"
+        is_legacy_project_output = (
+            saved_path.name.casefold() == "output"
+            and saved_path.parent.name.casefold()
+            in {
+                "voiceanator",
+                "scriptalator",
+            }
         )
 
-        if is_voiceanator_output:
+        if is_legacy_project_output:
+            return default_output_folder
+
+        if not saved_path.exists():
             return default_output_folder
 
         return saved_path
@@ -613,6 +824,39 @@ class SettingsService:
             return default
 
         return value
+
+    def _set_existing_folder(
+        self,
+        key: str,
+        folder_path: Path | str,
+    ) -> None:
+        """Store an existing folder path."""
+
+        normalized_folder = Path(folder_path).expanduser()
+
+        if not normalized_folder.is_dir():
+            return
+
+        self.settings.setValue(
+            key,
+            str(normalized_folder),
+        )
+        self.settings.sync()
+
+    def _set_boolean(
+        self,
+        key: str,
+        value: bool,
+    ) -> None:
+        """Store a boolean setting."""
+
+        if not isinstance(value, bool):
+            raise TypeError(
+                f"Setting '{key}' must be a boolean."
+            )
+
+        self.settings.setValue(key, value)
+        self.settings.sync()
 
     def _set_bounded_integer(
         self,
