@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from services.application_paths import ApplicationPaths
+from services.azure_settings_service import AzureSettingsService
 from services.edge_tts_service import EdgeTTSService
 from services.profile_service import ProfileService
 from services.project_service import ProjectService
@@ -31,6 +32,7 @@ from services.recovery_service import RecoveryService
 from services.settings_service import SettingsService
 from version import APP_NAME, APP_VERSION
 from widgets.about_dialog import AboutDialog
+from widgets.azure_settings_dialog import AzureSettingsDialog
 from widgets.button_bar import ButtonBar
 from widgets.help_viewer import HelpViewerDialog
 from widgets.output_panel import OutputPanel
@@ -108,6 +110,9 @@ class MainWindow(QMainWindow):
         self.generation_thread: NarrationGenerationThread | None = None
 
         self.settings_service = SettingsService(
+            self.application_paths
+        )
+        self.azure_settings_service = AzureSettingsService(
             self.application_paths
         )
         self.profile_service = ProfileService(
@@ -535,6 +540,14 @@ class MainWindow(QMainWindow):
             self._open_profiles_folder
         )
 
+        self.azureSpeechSettingsAction = QAction(
+            "Microsoft &Azure AI Speech...",
+            self,
+        )
+        self.azureSpeechSettingsAction.triggered.connect(
+            self._show_azure_settings_dialog
+        )
+
         self.preferencesAction = QAction(
             "&Preferences...",
             self,
@@ -546,6 +559,7 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(self.openOutputFolderAction)
         tools_menu.addAction(self.openProfilesFolderAction)
         tools_menu.addSeparator()
+        tools_menu.addAction(self.azureSpeechSettingsAction)
         tools_menu.addAction(self.preferencesAction)
 
         help_menu = self.menuBar().addMenu("&Help")
@@ -696,6 +710,24 @@ class MainWindow(QMainWindow):
         self._refresh_recent_projects_menu()
         self.statusBarWidget.setText(
             "Recent projects cleared."
+        )
+
+    def _show_azure_settings_dialog(self) -> None:
+        """Open the Microsoft Azure AI Speech settings dialog."""
+
+        dialog = AzureSettingsDialog(
+            settings_service=self.azure_settings_service,
+            parent=self,
+        )
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        self.statusBarWidget.setText(
+            "Microsoft Azure AI Speech settings saved successfully."
+        )
+        self.logging_service.info(
+            "Microsoft Azure AI Speech settings saved."
         )
 
     def _show_preferences_dialog(self) -> None:
