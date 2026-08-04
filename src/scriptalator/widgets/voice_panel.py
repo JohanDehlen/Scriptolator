@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Callable
+from typing import Any, Callable
 from uuid import uuid4
 
 from PySide6.QtCore import QThread, Qt, QUrl, Signal
@@ -16,13 +18,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from services.edge_tts_service import EdgeTTSService
+from services.application_paths import ApplicationPaths
+from services.azure_settings_service import AzureSettingsService
 from services.settings_service import SettingsService
+from services.speech_engine_manager import SpeechEngineManager
+from widgets.azure_settings_dialog import AzureSettingsDialog
 from widgets.profile_controls import ProfileControls
+from widgets.speech_engine_selector import SpeechEngineSelector
 
 
 class VoiceComboBox(QComboBox):
-    """Display friendly voice labels while exposing Microsoft voice IDs."""
+    """Display friendly labels while exposing Microsoft voice IDs."""
 
     def currentText(self) -> str:
         """Return the current Microsoft voice ID."""
@@ -37,10 +43,12 @@ class VoiceComboBox(QComboBox):
     def findText(
         self,
         text: str,
-        flags: Qt.MatchFlag = Qt.MatchFlag.MatchExactly
-        | Qt.MatchFlag.MatchCaseSensitive,
+        flags: Qt.MatchFlag = (
+            Qt.MatchFlag.MatchExactly
+            | Qt.MatchFlag.MatchCaseSensitive
+        ),
     ) -> int:
-        """Find either a Microsoft voice ID or a visible label."""
+        """Find either a Microsoft voice ID or visible label."""
 
         for index in range(self.count()):
             if self.itemData(index) == text:
@@ -50,7 +58,7 @@ class VoiceComboBox(QComboBox):
 
 
 class ResettableSlider(QSlider):
-    """Slider that resets to its default value when double-clicked."""
+    """Slider that resets to its default when double-clicked."""
 
     def __init__(
         self,
@@ -58,24 +66,55 @@ class ResettableSlider(QSlider):
         default_value: int,
     ) -> None:
         super().__init__(orientation)
-
         self.default_value = default_value
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        """Reset the slider to its configured default value."""
+        """Reset the slider to its configured default."""
 
         self.setValue(self.default_value)
         event.accept()
 
 
+class VoiceLoadingThread(QThread):
+    """Load voices from the active engine without blocking Qt."""
+
+    voices_loaded = Signal(object)
+    loading_failed = Signal(str)
+
+    def __init__(
+        self,
+        engine: Any,
+        engine_id: str,
+    ) -> None:
+        super().__init__()
+        self.engine = engine
+        self.engine_id = engine_id
+
+    def run(self) -> None:
+        """Retrieve normalized voice metadata."""
+
+        try:
+            voices = self.engine.get_voice_details()
+        except Exception as error:
+            self.loading_failed.emit(str(error))
+        else:
+            self.voices_loaded.emit(
+                {
+                    "engine_id": self.engine_id,
+                    "voices": voices,
+                }
+            )
+
+
 class VoicePreviewThread(QThread):
-    """Generate a short voice preview without blocking the interface."""
+    """Generate a voice preview without blocking Qt."""
 
     preview_generated = Signal(str)
     preview_failed = Signal(str)
 
     def __init__(
         self,
+        engine: Any,
         preview_text: str,
         voice: str,
         output_path: Path,
@@ -85,6 +124,7 @@ class VoicePreviewThread(QThread):
     ) -> None:
         super().__init__()
 
+        self.engine = engine
         self.preview_text = preview_text
         self.voice = voice
         self.output_path = output_path
@@ -96,7 +136,7 @@ class VoicePreviewThread(QThread):
         """Generate the preview MP3 and report the result."""
 
         try:
-            generated_path = EdgeTTSService.generate_mp3(
+            generated_path = self.engine.generate_mp3(
                 text=self.preview_text,
                 voice=self.voice,
                 output_path=self.output_path,
@@ -111,7 +151,7 @@ class VoicePreviewThread(QThread):
 
 
 class VoicePanel(QWidget):
-    """Display, filter, and preview Microsoft Edge narration voices."""
+    """Select, filter, favourite, and preview narration voices."""
 
     LANGUAGE_NAMES = {
         "af": "Afrikaans",
@@ -289,21 +329,8 @@ class VoicePanel(QWidget):
         "en-TZ": "English (Tanzania)",
     }
 
-    PREFERRED_ENGLISH_LOCALES = (
-        "en-US",
-        "en-GB",
-        "en-AU",
-        "en-CA",
-        "en-IN",
-        "en-IE",
-        "en-NZ",
-        "en-ZA",
-        "en-SG",
-        "en-HK",
-        "en-KE",
-        "en-NG",
-        "en-PH",
-        "en-TZ",
+    PREFERRED_ENGLISH_LOCALES = tuple(
+        ENGLISH_LOCALE_NAMES
     )
 
     CHINESE_LOCALE_NAMES = {
@@ -323,14 +350,21 @@ class VoicePanel(QWidget):
     def __init__(self) -> None:
         super().__init__()
 
-        self.all_voices: list[dict[str, str]] = []
+        self.application_paths = ApplicationPaths.create()
         self.settings_service = SettingsService(
-            Path(__file__).resolve().parents[3]
+            self.application_paths
         )
+        self.azure_settings_service = AzureSettingsService(
+            self.application_paths
+        )
+        self.engine_manager = SpeechEngineManager()
+
+        self.all_voices: list[dict[str, str]] = []
         self.favorite_voices = set(
             self.settings_service.get_favorite_voices()
         )
         self.preview_text_provider: Callable[[], str] | None = None
+        self.voice_loading_thread: VoiceLoadingThread | None = None
         self.preview_thread: VoicePreviewThread | None = None
         self.last_preview_path: Path | None = None
 
@@ -339,12 +373,17 @@ class VoicePanel(QWidget):
         self.profileControls = ProfileControls()
         layout.addWidget(self.profileControls)
 
+        self.engineSelector = SpeechEngineSelector(
+            engine_manager=self.engine_manager,
+            settings_service=self.azure_settings_service,
+        )
+        layout.addWidget(self.engineSelector)
+
         layout.addWidget(QLabel("Narration Language"))
 
         self.languageFilter = QComboBox()
         self.languageFilter.addItem("Loading languages...")
         self.languageFilter.setEnabled(False)
-
         layout.addWidget(self.languageFilter)
 
         layout.addWidget(QLabel("Narration Voice"))
@@ -364,7 +403,6 @@ class VoicePanel(QWidget):
 
         voice_selection_layout.addWidget(self.favoriteButton)
         voice_selection_layout.addWidget(self.voiceCombo, 1)
-
         layout.addLayout(voice_selection_layout)
 
         layout.addWidget(QLabel("Speed"))
@@ -379,7 +417,6 @@ class VoicePanel(QWidget):
         self.speedValueLabel.setAlignment(
             Qt.AlignmentFlag.AlignCenter
         )
-
         layout.addWidget(self.speedValueLabel)
 
         layout.addWidget(QLabel("Pitch"))
@@ -398,7 +435,6 @@ class VoicePanel(QWidget):
         self.pitchValueLabel.setAlignment(
             Qt.AlignmentFlag.AlignCenter
         )
-
         layout.addWidget(self.pitchValueLabel)
 
         layout.addWidget(QLabel("Volume"))
@@ -423,7 +459,6 @@ class VoicePanel(QWidget):
         self.volumeValueLabel.setAlignment(
             Qt.AlignmentFlag.AlignCenter
         )
-
         layout.addWidget(self.volumeValueLabel)
 
         reset_hint = QLabel(
@@ -431,14 +466,18 @@ class VoicePanel(QWidget):
         )
         reset_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         reset_hint.setStyleSheet("font-style: italic;")
-
         layout.addWidget(reset_hint)
 
         self.previewButton = QPushButton("Preview")
         layout.addWidget(self.previewButton)
-
         layout.addStretch()
 
+        self.engineSelector.engine_changed.connect(
+            self._engine_changed
+        )
+        self.engineSelector.azure_settings_requested.connect(
+            self._show_azure_settings_dialog
+        )
         self.languageFilter.currentIndexChanged.connect(
             self._apply_language_filter
         )
@@ -463,125 +502,186 @@ class VoicePanel(QWidget):
 
         self.load_voices()
 
+    @property
+    def current_engine_id(self) -> str:
+        """Return the active speech-engine identifier."""
+
+        return self.engine_manager.current_engine_id
+
     def set_preview_text_provider(
         self,
         provider: Callable[[], str],
     ) -> None:
-        """Set the function used to obtain narration preview text."""
+        """Set the function used to obtain preview text."""
 
         self.preview_text_provider = provider
 
-    def _get_preview_text(self) -> str:
-        """Return script-based preview text or a safe fallback."""
+    def _show_azure_settings_dialog(self) -> None:
+        """Open Azure settings and refresh the selector."""
 
-        default_text = (
-            "In the beginning, God created the heavens and the earth."
+        dialog = AzureSettingsDialog(
+            settings_service=self.azure_settings_service,
+            parent=self,
         )
+        dialog.exec()
+        self.engineSelector.refresh_after_azure_settings()
 
-        if self.preview_text_provider is None:
-            return default_text
+    def _engine_changed(self, _: str) -> None:
+        """Reload voices after the speech engine changes."""
 
-        provided_text = self.preview_text_provider().strip()
-
-        if not provided_text:
-            return default_text
-
-        words = provided_text.split()
-
-        return " ".join(words[:25])
-
-    @staticmethod
-    def _create_centered_slider() -> ResettableSlider:
-        """Create a slider with minimum, centre, and maximum ticks."""
-
-        slider = ResettableSlider(
-            Qt.Orientation.Horizontal,
-            default_value=0,
-        )
-        slider.setRange(-100, 100)
-        slider.setValue(0)
-        slider.setTickPosition(
-            QSlider.TickPosition.TicksBelow
-        )
-        slider.setTickInterval(100)
-        slider.setSingleStep(1)
-        slider.setPageStep(10)
-
-        return slider
-
-    @staticmethod
-    def _create_scale_labels(
-        minimum_text: str,
-        centre_text: str,
-        maximum_text: str,
-    ) -> QHBoxLayout:
-        """Create labels aligned beneath a slider."""
-
-        scale_layout = QHBoxLayout()
-
-        minimum_label = QLabel(minimum_text)
-        centre_label = QLabel(centre_text)
-        maximum_label = QLabel(maximum_text)
-
-        centre_label.setAlignment(
-            Qt.AlignmentFlag.AlignCenter
-        )
-        maximum_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight
-        )
-
-        centre_label.setStyleSheet("font-weight: bold;")
-
-        scale_layout.addWidget(minimum_label)
-        scale_layout.addStretch()
-        scale_layout.addWidget(centre_label)
-        scale_layout.addStretch()
-        scale_layout.addWidget(maximum_label)
-
-        return scale_layout
+        self.load_voices()
 
     def load_voices(self) -> None:
-        """Load Microsoft Edge voices and populate language choices."""
+        """Load voices from the active speech engine."""
 
-        self.voiceCombo.setEnabled(False)
-        self.voiceCombo.clear()
-        self.voiceCombo.addItem("Loading voices...")
+        if (
+            self.voice_loading_thread is not None
+            and self.voice_loading_thread.isRunning()
+        ):
+            return
 
-        try:
-            self.all_voices = EdgeTTSService.get_voice_details()
-        except Exception as error:
-            self.all_voices = []
+        self.all_voices = []
+        self._set_voice_loading_state(True)
 
-            self.languageFilter.clear()
-            self.languageFilter.addItem("Languages unavailable")
-            self.languageFilter.setEnabled(False)
+        engine_id = self.engine_manager.current_engine_id
+        engine = self.engine_manager.current_engine
 
-            self.voiceCombo.clear()
-            self.voiceCombo.addItem("Unable to load voices")
+        self.voice_loading_thread = VoiceLoadingThread(
+            engine=engine,
+            engine_id=engine_id,
+        )
+        self.voice_loading_thread.voices_loaded.connect(
+            self._voices_loaded
+        )
+        self.voice_loading_thread.loading_failed.connect(
+            self._voice_loading_failed
+        )
+        self.voice_loading_thread.finished.connect(
+            self._voice_loading_finished
+        )
+        self.voice_loading_thread.start()
 
-            QMessageBox.critical(
-                self,
-                "Voice Loading Error",
-                (
-                    "Microsoft Edge voices could not be loaded.\n\n"
-                    f"{error}"
-                ),
+    def _voices_loaded(self, payload: object) -> None:
+        """Populate controls after successful voice retrieval."""
+
+        if not isinstance(payload, dict):
+            self._voice_loading_failed(
+                "The speech engine returned invalid voice data."
+            )
+            return
+
+        engine_id = str(payload.get("engine_id", ""))
+        voices = payload.get("voices")
+
+        if engine_id != self.engine_manager.current_engine_id:
+            return
+
+        if not isinstance(voices, list):
+            self._voice_loading_failed(
+                "The speech engine returned invalid voice data."
+            )
+            return
+
+        self.all_voices = [
+            voice
+            for voice in voices
+            if isinstance(voice, dict)
+            and str(voice.get("short_name", "")).strip()
+        ]
+
+        if not self.all_voices:
+            self._voice_loading_failed(
+                "The selected speech engine returned no voices."
             )
             return
 
         self._populate_languages()
         self._apply_language_filter()
+        self._restore_saved_voice_selection()
+
+    def _restore_saved_voice_selection(self) -> None:
+        """Restore the saved language and voice after loading."""
+
+        saved_language = self.settings_service.get_language()
+        saved_voice = self.settings_service.get_voice()
+
+        language_index = self.languageFilter.findData(
+            saved_language
+        )
+
+        if language_index < 0:
+            language_index = 0
+
+        self.languageFilter.setCurrentIndex(language_index)
+
+        voice_index = self.voiceCombo.findText(saved_voice)
+
+        if voice_index >= 0:
+            self.voiceCombo.setCurrentIndex(voice_index)
+
+    def _voice_loading_failed(self, error_text: str) -> None:
+        """Display a voice-loading error."""
+
+        self.all_voices = []
+
+        self.languageFilter.clear()
+        self.languageFilter.addItem("Languages unavailable")
+        self.languageFilter.setEnabled(False)
+
+        self.voiceCombo.clear()
+        self.voiceCombo.addItem("Unable to load voices")
+        self.voiceCombo.setEnabled(False)
+
+        self.favoriteButton.setEnabled(False)
+        self.previewButton.setEnabled(False)
+
+        QMessageBox.critical(
+            self,
+            "Voice Loading Error",
+            (
+                f"{self.engine_manager.current_engine_name} voices "
+                "could not be loaded.\n\n"
+                f"{error_text}"
+            ),
+        )
+
+    def _voice_loading_finished(self) -> None:
+        """Release the completed voice-loading worker."""
+
+        worker = self.voice_loading_thread
+        self.voice_loading_thread = None
+
+        if worker is not None:
+            worker.deleteLater()
+
+        self.engineSelector.setEnabled(True)
+
+        if self.all_voices:
+            self.previewButton.setEnabled(True)
+
+    def _set_voice_loading_state(self, loading: bool) -> None:
+        """Show or clear the voice-loading state."""
+
+        self.engineSelector.setEnabled(not loading)
+        self.languageFilter.clear()
+        self.languageFilter.addItem("Loading languages...")
+        self.languageFilter.setEnabled(False)
+        self.voiceCombo.clear()
+        self.voiceCombo.addItem("Loading voices...")
+        self.voiceCombo.setEnabled(False)
+        self.favoriteButton.setEnabled(False)
+        self.previewButton.setEnabled(False)
 
     def _populate_languages(self) -> None:
         """Populate the dropdown with friendly locale names."""
 
         locales = {
-            voice["locale"]
+            str(voice.get("locale", "")).strip()
             for voice in self.all_voices
-            if voice["locale"]
+            if str(voice.get("locale", "")).strip()
         }
 
-        language_entries = sorted(
+        entries = sorted(
             (
                 self._language_sort_key(locale),
                 self._friendly_locale_name(locale),
@@ -592,20 +692,14 @@ class VoicePanel(QWidget):
 
         self.languageFilter.blockSignals(True)
         self.languageFilter.clear()
-        self.languageFilter.addItem(
-            "All Languages",
-            "",
-        )
+        self.languageFilter.addItem("All Languages", "")
         self.languageFilter.addItem(
             "★ Favorites",
             self.FAVORITES_FILTER_VALUE,
         )
 
-        for _, language_name, locale in language_entries:
-            self.languageFilter.addItem(
-                language_name,
-                locale,
-            )
+        for _, name, locale in entries:
+            self.languageFilter.addItem(name, locale)
 
         self.languageFilter.setCurrentIndex(0)
         self.languageFilter.setEnabled(True)
@@ -620,21 +714,21 @@ class VoicePanel(QWidget):
         )
 
         if selected_locale == self.FAVORITES_FILTER_VALUE:
-            matching_voices = [
+            matching = [
                 voice
                 for voice in self.all_voices
                 if voice["short_name"] in self.favorite_voices
             ]
         elif selected_locale:
-            matching_voices = [
+            matching = [
                 voice
                 for voice in self.all_voices
-                if voice["locale"] == selected_locale
+                if voice.get("locale") == selected_locale
             ]
         else:
-            matching_voices = self.all_voices.copy()
+            matching = self.all_voices.copy()
 
-        matching_voices.sort(
+        matching.sort(
             key=lambda voice: (
                 self._voice_display_name(voice).lower(),
                 voice["short_name"].lower(),
@@ -644,7 +738,7 @@ class VoicePanel(QWidget):
         self.voiceCombo.blockSignals(True)
         self.voiceCombo.clear()
 
-        if not matching_voices:
+        if not matching:
             self.voiceCombo.addItem("No voices found")
             self.voiceCombo.setEnabled(False)
             self.favoriteButton.setEnabled(False)
@@ -652,7 +746,7 @@ class VoicePanel(QWidget):
             self._update_favorite_button()
             return
 
-        for voice in matching_voices:
+        for voice in matching:
             display_name = self._voice_display_name(voice)
 
             if voice["short_name"] in self.favorite_voices:
@@ -664,9 +758,10 @@ class VoicePanel(QWidget):
             )
 
         self.voiceCombo.setEnabled(True)
-        self.favoriteButton.setEnabled(True)
 
-        current_index = self.voiceCombo.findText(current_voice_id)
+        current_index = self.voiceCombo.findText(
+            current_voice_id
+        )
 
         if current_index >= 0:
             self.voiceCombo.setCurrentIndex(current_index)
@@ -682,8 +777,8 @@ class VoicePanel(QWidget):
         if not self._is_valid_voice(voice_id):
             return
 
-        is_favorite = self.settings_service.toggle_favorite_voice(
-            voice_id
+        is_favorite = (
+            self.settings_service.toggle_favorite_voice(voice_id)
         )
 
         if is_favorite:
@@ -692,6 +787,7 @@ class VoicePanel(QWidget):
             self.favorite_voices.discard(voice_id)
 
         self._apply_language_filter()
+
         restored_index = self.voiceCombo.findText(voice_id)
 
         if restored_index >= 0:
@@ -719,80 +815,8 @@ class VoicePanel(QWidget):
             "Add the selected voice to Favorites"
         )
 
-    @classmethod
-    def _language_sort_key(
-        cls,
-        locale: str,
-    ) -> tuple[int, int, str]:
-        """Place English variants first, then other languages alphabetically."""
-
-        if locale in cls.PREFERRED_ENGLISH_LOCALES:
-            return (
-                0,
-                cls.PREFERRED_ENGLISH_LOCALES.index(locale),
-                "",
-            )
-
-        return (
-            1,
-            0,
-            cls._friendly_locale_name(locale).lower(),
-        )
-
-    @classmethod
-    def _friendly_locale_name(cls, locale: str) -> str:
-        """Convert a Microsoft locale code into a readable name."""
-
-        if locale in cls.ENGLISH_LOCALE_NAMES:
-            return cls.ENGLISH_LOCALE_NAMES[locale]
-
-        if locale in cls.CHINESE_LOCALE_NAMES:
-            return cls.CHINESE_LOCALE_NAMES[locale]
-
-        language_code, separator, region_code = locale.partition("-")
-
-        language_name = cls.LANGUAGE_NAMES.get(
-            language_code.lower(),
-            language_code.upper(),
-        )
-
-        if not separator:
-            return language_name
-
-        region_name = cls.REGION_NAMES.get(
-            region_code.upper(),
-            region_code.upper(),
-        )
-
-        return f"{language_name} ({region_name})"
-
-    @staticmethod
-    def _simple_voice_name(short_name: str) -> str:
-        """Extract the speaker name from a Microsoft voice ID."""
-
-        name = short_name.rsplit("-", 1)[-1]
-
-        if name.lower().endswith("neural"):
-            name = name[:-6]
-
-        return name or short_name
-
-    @classmethod
-    def _voice_display_name(
-        cls,
-        voice: dict[str, str],
-    ) -> str:
-        """Return the friendly label shown in the voice dropdown."""
-
-        speaker_name = cls._simple_voice_name(
-            voice["short_name"]
-        )
-        gender = voice["gender"].strip() or "Unknown"
-
-        return f"{speaker_name} — {gender}"
-
     def _preview_voice(self) -> None:
-        """Generate and play a preview of the selected voice."""
+        """Generate and play a preview using the active engine."""
 
         if (
             self.preview_thread is not None
@@ -801,7 +825,7 @@ class VoicePanel(QWidget):
             QMessageBox.information(
                 self,
                 "Preview In Progress",
-                "Scriptalator is already generating a voice preview.",
+                "Scriptolator is already generating a voice preview.",
             )
             return
 
@@ -811,16 +835,17 @@ class VoicePanel(QWidget):
             QMessageBox.warning(
                 self,
                 "Voice Not Available",
-                "Select a valid Microsoft Edge voice first.",
+                "Select a valid narration voice first.",
             )
             return
 
         preview_path = (
             Path(gettempdir())
-            / f"scriptalator-preview-{uuid4().hex}.mp3"
+            / f"scriptolator-preview-{uuid4().hex}.mp3"
         )
 
         self.preview_thread = VoicePreviewThread(
+            engine=self.engine_manager.current_engine,
             preview_text=self._get_preview_text(),
             voice=voice,
             output_path=preview_path,
@@ -834,7 +859,6 @@ class VoicePanel(QWidget):
                 self.volumeSlider.value() - 100
             ),
         )
-
         self.preview_thread.preview_generated.connect(
             self._preview_generated
         )
@@ -844,17 +868,13 @@ class VoicePanel(QWidget):
         self.preview_thread.finished.connect(
             self._preview_finished
         )
-        self.preview_thread.finished.connect(
-            self.preview_thread.deleteLater
-        )
 
         self._set_preview_controls_enabled(False)
         self.previewButton.setText("Generating...")
-
         self.preview_thread.start()
 
     def _preview_generated(self, preview_path: str) -> None:
-        """Open the generated preview in the default audio player."""
+        """Open the generated preview in the default player."""
 
         self.last_preview_path = Path(preview_path)
 
@@ -881,28 +901,36 @@ class VoicePanel(QWidget):
             self,
             "Voice Preview Failed",
             (
-                "Scriptalator could not generate the voice preview.\n\n"
+                "Scriptolator could not generate the voice preview."
+                "\n\n"
                 f"{error_message}"
             ),
         )
 
     def _preview_finished(self) -> None:
-        """Restore the preview controls after generation."""
+        """Restore controls after preview generation."""
+
+        worker = self.preview_thread
+        self.preview_thread = None
 
         self._set_preview_controls_enabled(True)
         self.previewButton.setText("Preview")
-        self.preview_thread = None
+
+        if worker is not None:
+            worker.deleteLater()
 
     def _set_preview_controls_enabled(
         self,
         enabled: bool,
     ) -> None:
-        """Enable or disable controls used by voice preview."""
+        """Enable or disable controls used by preview."""
 
+        self.engineSelector.setEnabled(enabled)
         self.languageFilter.setEnabled(enabled)
         self.voiceCombo.setEnabled(enabled)
         self.favoriteButton.setEnabled(
-            enabled and self._is_valid_voice(
+            enabled
+            and self._is_valid_voice(
                 self.voiceCombo.currentText().strip()
             )
         )
@@ -910,6 +938,148 @@ class VoicePanel(QWidget):
         self.pitchSlider.setEnabled(enabled)
         self.volumeSlider.setEnabled(enabled)
         self.previewButton.setEnabled(enabled)
+
+    def _get_preview_text(self) -> str:
+        """Return script-based preview text or a fallback."""
+
+        default_text = (
+            "In the beginning, God created the heavens and the earth."
+        )
+
+        if self.preview_text_provider is None:
+            return default_text
+
+        provided_text = self.preview_text_provider().strip()
+
+        if not provided_text:
+            return default_text
+
+        return " ".join(provided_text.split()[:25])
+
+    @staticmethod
+    def _create_centered_slider() -> ResettableSlider:
+        """Create a slider with minimum, centre, and maximum ticks."""
+
+        slider = ResettableSlider(
+            Qt.Orientation.Horizontal,
+            default_value=0,
+        )
+        slider.setRange(-100, 100)
+        slider.setValue(0)
+        slider.setTickPosition(
+            QSlider.TickPosition.TicksBelow
+        )
+        slider.setTickInterval(100)
+        slider.setSingleStep(1)
+        slider.setPageStep(10)
+        return slider
+
+    @staticmethod
+    def _create_scale_labels(
+        minimum_text: str,
+        centre_text: str,
+        maximum_text: str,
+    ) -> QHBoxLayout:
+        """Create labels aligned beneath a slider."""
+
+        scale_layout = QHBoxLayout()
+
+        minimum_label = QLabel(minimum_text)
+        centre_label = QLabel(centre_text)
+        maximum_label = QLabel(maximum_text)
+
+        centre_label.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+        maximum_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight
+        )
+        centre_label.setStyleSheet("font-weight: bold;")
+
+        scale_layout.addWidget(minimum_label)
+        scale_layout.addStretch()
+        scale_layout.addWidget(centre_label)
+        scale_layout.addStretch()
+        scale_layout.addWidget(maximum_label)
+
+        return scale_layout
+
+    @classmethod
+    def _language_sort_key(
+        cls,
+        locale: str,
+    ) -> tuple[int, int, str]:
+        """Place English variants first."""
+
+        if locale in cls.PREFERRED_ENGLISH_LOCALES:
+            return (
+                0,
+                cls.PREFERRED_ENGLISH_LOCALES.index(locale),
+                "",
+            )
+
+        return (
+            1,
+            0,
+            cls._friendly_locale_name(locale).lower(),
+        )
+
+    @classmethod
+    def _friendly_locale_name(cls, locale: str) -> str:
+        """Convert a Microsoft locale code to a readable name."""
+
+        if locale in cls.ENGLISH_LOCALE_NAMES:
+            return cls.ENGLISH_LOCALE_NAMES[locale]
+
+        if locale in cls.CHINESE_LOCALE_NAMES:
+            return cls.CHINESE_LOCALE_NAMES[locale]
+
+        language_code, separator, region_code = (
+            locale.partition("-")
+        )
+        language_name = cls.LANGUAGE_NAMES.get(
+            language_code.lower(),
+            language_code.upper(),
+        )
+
+        if not separator:
+            return language_name
+
+        region_name = cls.REGION_NAMES.get(
+            region_code.upper(),
+            region_code.upper(),
+        )
+        return f"{language_name} ({region_name})"
+
+    @staticmethod
+    def _simple_voice_name(short_name: str) -> str:
+        """Extract a speaker name from a Microsoft voice ID."""
+
+        name = short_name.rsplit("-", 1)[-1]
+
+        if name.lower().endswith("neural"):
+            name = name[:-6]
+
+        return name or short_name
+
+    @classmethod
+    def _voice_display_name(
+        cls,
+        voice: dict[str, str],
+    ) -> str:
+        """Return the friendly voice dropdown label."""
+
+        friendly_name = str(
+            voice.get("friendly_name", "")
+        ).strip()
+        speaker_name = friendly_name or cls._simple_voice_name(
+            voice["short_name"]
+        )
+        gender = str(
+            voice.get("gender", "")
+        ).strip() or "Unknown"
+
+        return f"{speaker_name} — {gender}"
 
     def _update_speed_label(self, value: int) -> None:
         """Display the current speed adjustment."""
@@ -934,18 +1104,18 @@ class VoicePanel(QWidget):
 
     @classmethod
     def _is_valid_voice(cls, voice: str) -> bool:
-        """Return whether the selected value is a usable voice."""
+        """Return whether the selected value is usable."""
 
         return bool(voice) and voice not in cls.INVALID_VOICE_VALUES
 
     @staticmethod
     def _format_percentage(value: int) -> str:
-        """Format an integer as an Edge TTS percentage adjustment."""
+        """Format an integer as a TTS percentage adjustment."""
 
         return f"{value:+d}%"
 
     @staticmethod
     def _format_pitch(value: int) -> str:
-        """Format an integer as an Edge TTS pitch adjustment."""
+        """Format an integer as a TTS pitch adjustment."""
 
         return f"{value:+d}Hz"
