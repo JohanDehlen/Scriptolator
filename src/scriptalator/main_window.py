@@ -235,11 +235,20 @@ class MainWindow(QMainWindow):
         self._update_script_statistics()
         self._update_window_title()
         self._restore_window_state()
+
+        QTimer.singleShot(
+            0,
+            self._complete_startup_recovery,
+        )
+
+        self.scriptEditor.editor.setFocus()
+
+    def _complete_startup_recovery(self) -> None:
+        """Handle recovery after the main window becomes visible."""
+
         self._handle_startup_recovery()
         self._recovery_enabled = True
         self._schedule_recovery_save()
-
-        self.scriptEditor.editor.setFocus()
 
     def _handle_startup_recovery(self) -> None:
         """Offer to restore work left by an unclean shutdown."""
