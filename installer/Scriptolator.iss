@@ -20,6 +20,7 @@ AppContact={#MyAppURL}
 DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+DisableWelcomePage=no
 UsePreviousAppDir=yes
 
 PrivilegesRequired=lowest
@@ -29,12 +30,19 @@ ArchitecturesInstallIn64BitMode=x64compatible
 
 OutputDir=output
 OutputBaseFilename=ScriptolatorSetup-{#MyAppVersion}
+
 SetupIconFile=..\src\scriptalator\resources\scriptolator.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
+WizardStyle=modern
+WizardImageFile=branding\wizard.png
+WizardSmallImageFile=branding\wizard_small.png
+WizardImageStretch=yes
+WizardImageBackColor=$230804
+WizardSmallImageBackColor=$40100A
+
 Compression=lzma2/ultra64
 SolidCompression=yes
-WizardStyle=modern
 
 CloseApplications=yes
 RestartApplications=no
@@ -59,18 +67,19 @@ UpdateUninstallLogAppName=yes
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[Messages]
+WelcomeLabel1=Welcome to the%nScriptolator Setup Wizard
+WelcomeLabel2=This will install Scriptolator {#MyAppVersion} on your computer.%n%nScriptolator transforms written scripts into professional AI narration using natural-sounding Microsoft Edge Neural voices.%n%nClose other applications before continuing, then click Next.
+FinishedHeadingLabel=Scriptolator is ready
+FinishedLabel=Scriptolator has been installed successfully.%n%nLaunch the application now or open the Quick Start Guide to create your first narration.
+ClickFinish=Click Finish to complete Setup.
+BeveledLabel=Scriptolator {#MyAppVersion}  •  Professional AI Narration
+
 [Tasks]
 Name: "desktopicon"; \
     Description: "Create a &desktop shortcut"; \
     GroupDescription: "Additional shortcuts:"; \
     Flags: unchecked
-
-[Dirs]
-Name: "{app}\output"
-Name: "{app}\profiles"
-Name: "{app}\projects"
-Name: "{app}\logs"
-Name: "{app}\recovery"
 
 [Files]
 Source: "..\dist\{#MyAppExeName}"; \
@@ -134,14 +143,53 @@ Filename: "{app}\{#MyAppExeName}"; \
     WorkingDir: "{app}"; \
     Flags: nowait postinstall skipifsilent
 
-[UninstallDelete]
-; Remove temporary and diagnostic data.
-; User-created projects, profiles and generated output are preserved.
-Type: filesandordirs; Name: "{app}\recovery"
-Type: filesandordirs; Name: "{app}\logs"
+Filename: "{app}\docs\QuickStart.md"; \
+    Description: "Open the Quick Start Guide"; \
+    WorkingDir: "{app}\docs"; \
+    Flags: shellexec postinstall skipifsilent unchecked
 
 [Code]
-function InitializeSetup(): Boolean;
+const
+  BrandPurple = $00881131;
+  BrandBlue = $00FFA400;
+  BrandText = $00402018;
+
+procedure ApplyBrandTypography;
 begin
-  Result := True;
+  WizardForm.Caption := '{#MyAppName} Setup';
+
+  WizardForm.WelcomeLabel1.Font.Name := 'Georgia';
+  WizardForm.WelcomeLabel1.Font.Size := 17;
+  WizardForm.WelcomeLabel1.Font.Style := [fsBold, fsItalic];
+  WizardForm.WelcomeLabel1.Font.Color := BrandPurple;
+
+  WizardForm.WelcomeLabel2.Font.Name := 'Segoe UI';
+  WizardForm.WelcomeLabel2.Font.Size := 10;
+  WizardForm.WelcomeLabel2.Font.Color := BrandText;
+
+  WizardForm.FinishedHeadingLabel.Font.Name := 'Georgia';
+  WizardForm.FinishedHeadingLabel.Font.Size := 17;
+  WizardForm.FinishedHeadingLabel.Font.Style := [fsBold, fsItalic];
+  WizardForm.FinishedHeadingLabel.Font.Color := BrandPurple;
+
+  WizardForm.FinishedLabel.Font.Name := 'Segoe UI';
+  WizardForm.FinishedLabel.Font.Size := 10;
+  WizardForm.FinishedLabel.Font.Color := BrandText;
+
+  WizardForm.PageNameLabel.Font.Name := 'Georgia';
+  WizardForm.PageNameLabel.Font.Size := 12;
+  WizardForm.PageNameLabel.Font.Style := [fsBold, fsItalic];
+  WizardForm.PageNameLabel.Font.Color := BrandPurple;
+
+  WizardForm.PageDescriptionLabel.Font.Name := 'Segoe UI';
+  WizardForm.PageDescriptionLabel.Font.Color := BrandText;
+
+  WizardForm.BeveledLabel.Font.Name := 'Segoe UI';
+  WizardForm.BeveledLabel.Font.Style := [fsBold];
+  WizardForm.BeveledLabel.Font.Color := BrandBlue;
+end;
+
+procedure InitializeWizard;
+begin
+  ApplyBrandTypography;
 end;
