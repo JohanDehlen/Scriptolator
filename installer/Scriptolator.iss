@@ -1,5 +1,5 @@
 #define MyAppName "Scriptolator"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "Johan Dehlen"
 #define MyAppURL "https://scriptolator.com"
 #define MyAppExeName "Scriptolator.exe"
@@ -69,7 +69,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
 WelcomeLabel1=Welcome to the%nScriptolator Setup Wizard
-WelcomeLabel2=This will install Scriptolator {#MyAppVersion} on your computer.%n%nScriptolator transforms written scripts into professional AI narration using natural-sounding Microsoft Edge Neural voices.%n%nClose other applications before continuing, then click Next.
+WelcomeLabel2=This will install Scriptolator {#MyAppVersion} on your computer.%n%nScriptolator transforms written scripts into professional AI narration using Microsoft Edge and Microsoft Azure AI Speech voices.%n%nClose other applications before continuing, then click Next.
 FinishedHeadingLabel=Scriptolator is ready
 FinishedLabel=Scriptolator has been installed successfully.%n%nLaunch the application now or open the Quick Start Guide to create your first narration.
 ClickFinish=Click Finish to complete Setup.

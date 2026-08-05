@@ -4,7 +4,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 set "APP_NAME=Scriptolator"
-set "APP_VERSION=1.0.0"
+set "APP_VERSION=1.1.0"
 set "INSTALLER_SCRIPT=installer\Scriptolator.iss"
 set "APPLICATION_EXE=dist\Scriptolator.exe"
 set "OUTPUT_DIRECTORY=installer\output"

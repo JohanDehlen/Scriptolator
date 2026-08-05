@@ -796,6 +796,9 @@ class MainWindow(QMainWindow):
             current_profile=profile_name,
             current_project=project_name,
             voice_count=len(self.voicePanel.all_voices),
+            current_engine=(
+                self.voicePanel.engine_manager.current_engine_name
+            ),
         )
         dialog.exec()
 

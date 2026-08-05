@@ -4,13 +4,13 @@
 
 # User Guide
 
-**Version 1.0.0**
+**Version 1.1.0**
 
 ---
 
 # 1. Introduction
 
-Scriptolator is a Windows desktop application for creating high-quality AI narration from written scripts using Microsoft's Edge Neural voices.
+Scriptolator is a Windows desktop application for creating high-quality AI narration from written scripts using Microsoft Edge and Microsoft Azure AI Speech voices.
 
 It is designed for creators who need a fast, repeatable workflow from script to finished MP3.
 
@@ -41,7 +41,14 @@ Scriptolator remembers the last folder used for opening scripts to speed up futu
 
 ---
 
-# 4. Voices
+# 4. Speech Engines and Voices
+
+Use the **Speech Engine** list to choose:
+
+- **Microsoft Edge** – free Microsoft voices that do not require an Azure account.
+- **Microsoft Azure AI Speech** – Azure voices, including multilingual voices such as Jorge Multilingual.
+
+Before selecting Azure for the first time, click **Configure Azure...** and enter the subscription key and region for your Azure Speech resource. Scriptolator stores the key securely in Windows Credential Manager.
 
 Use the **Narration Language** list to filter voices by language.
 
@@ -55,6 +62,7 @@ Click the **☆ / ★** button beside the voice list to add or remove favourites
 
 Voice Profiles store:
 
+- Speech engine
 - Voice
 - Speed
 - Pitch
@@ -81,12 +89,13 @@ Use **File → Save Project** regularly.
 # 7. Generating Narration
 
 1. Prepare your script.
-2. Select a voice.
-3. Preview if required.
-4. Click **Generate MP3**.
-5. Choose the output filename.
-6. Wait for generation to complete.
-7. Play the finished narration or open the output folder.
+2. Select a speech engine.
+3. Select a voice.
+4. Preview if required.
+5. Click **Generate MP3**.
+6. Choose the output filename.
+7. Wait for generation to complete.
+8. Play the finished narration or open the output folder.
 
 ---
 
@@ -126,4 +135,4 @@ These files are primarily intended for troubleshooting.
 
 © 2026 Johan Dehlen
 
-Scriptolator 1.0.0
+Scriptolator 1.1.0

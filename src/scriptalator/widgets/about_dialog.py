@@ -48,12 +48,17 @@ class AboutDialog(QDialog):
         current_profile: str = "",
         current_project: str = "",
         voice_count: int | None = None,
+        current_engine: str = "",
     ) -> None:
         super().__init__(parent)
 
         self.current_profile = current_profile.strip()
         self.current_project = current_project.strip()
         self.voice_count = voice_count
+        self.current_engine = (
+            current_engine.strip()
+            or "Microsoft Edge"
+        )
 
         self.setWindowTitle(f"About {APP_NAME}")
         self.setModal(True)
@@ -94,7 +99,7 @@ class AboutDialog(QDialog):
 
         description = QLabel(
             "Transform scripts into professional AI narration "
-            "using Microsoft Edge Neural voices."
+            "using Microsoft Edge and Microsoft Azure AI Speech voices."
         )
         description.setAlignment(Qt.AlignmentFlag.AlignCenter)
         description.setWordWrap(True)
@@ -122,7 +127,7 @@ class AboutDialog(QDialog):
             ("Created by", "Johan Dehlen"),
             (
                 "Narration engine",
-                "Microsoft Edge Neural Voices via edge-tts",
+                self.current_engine,
             ),
             ("Website", "Scriptolator.com"),
             ("Copyright", self.COPYRIGHT_TEXT),
@@ -231,9 +236,13 @@ class AboutDialog(QDialog):
             f"Operating system: {platform.platform()}",
         ]
 
+        lines.append(
+            f"Current speech engine: {self.current_engine}"
+        )
+
         if self.voice_count is not None:
             lines.append(
-                f"Available Microsoft voices: {self.voice_count}"
+                f"Available voices: {self.voice_count}"
             )
 
         lines.append(

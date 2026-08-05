@@ -4,13 +4,13 @@
 
 # Quick Start Guide
 
-**Version 1.0.0**
+**Version 1.1.0**
 
 ---
 
 ## Welcome
 
-Welcome to **Scriptolator**, a Windows desktop application that transforms written scripts into natural-sounding AI narration using Microsoft's Edge Neural voices.
+Welcome to **Scriptolator**, a Windows desktop application that transforms written scripts into natural-sounding AI narration using Microsoft Edge or Microsoft Azure AI Speech voices.
 
 This guide will help you create your first narration in just a few minutes.
 
@@ -32,9 +32,12 @@ Type directly into the **Script Editor** or choose **Script → Open** to load a
 
 In the **Voice Panel**:
 
+- Choose **Microsoft Edge** for free narration without an Azure account, or **Microsoft Azure AI Speech** for Azure voices.
 - Select a language.
 - Select a narration voice.
 - Adjust Speed, Pitch and Volume if required.
+
+To use Azure for the first time, click **Configure Azure...**, enter the subscription key and region for your Azure Speech resource, and test the connection before saving.
 
 Tip: Click the ☆ button to add frequently used voices to **Favorites**.
 
@@ -76,6 +79,8 @@ Projects store:
 - Selected profile
 - Related project information
 
+Narration Profiles also remember the selected speech engine, so an Azure profile can restore Azure and its saved voice automatically.
+
 ---
 
 # Recovery
@@ -106,4 +111,4 @@ The complete documentation is available from the **Help** menu.
 
 © 2026 Johan Dehlen
 
-Scriptolator 1.0.0
+Scriptolator 1.1.0

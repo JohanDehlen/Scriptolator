@@ -8,6 +8,12 @@ from PyInstaller.utils.hooks import collect_all
 edge_tts_datas, edge_tts_binaries, edge_tts_hiddenimports = collect_all(
     "edge_tts"
 )
+azure_datas, azure_binaries, azure_hiddenimports = collect_all(
+    "azure.cognitiveservices.speech"
+)
+keyring_datas, keyring_binaries, keyring_hiddenimports = collect_all(
+    "keyring"
+)
 
 project_root = Path(SPECPATH)
 source_root = project_root / "src" / "scriptalator"
@@ -17,7 +23,11 @@ docs_root = project_root / "docs"
 analysis = Analysis(
     [str(source_root / "main.py")],
     pathex=[str(source_root)],
-    binaries=edge_tts_binaries,
+    binaries=[
+        *edge_tts_binaries,
+        *azure_binaries,
+        *keyring_binaries,
+    ],
     datas=[
         (
             str(resources_root),
@@ -28,8 +38,15 @@ analysis = Analysis(
             "docs",
         ),
         *edge_tts_datas,
+        *azure_datas,
+        *keyring_datas,
     ],
-    hiddenimports=edge_tts_hiddenimports,
+    hiddenimports=[
+        *edge_tts_hiddenimports,
+        *azure_hiddenimports,
+        *keyring_hiddenimports,
+        "keyring.backends.Windows",
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
