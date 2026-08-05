@@ -30,6 +30,12 @@ class ProfileService:
         "volume",
     }
 
+    SUPPORTED_ENGINES = {
+        "edge",
+        "azure",
+    }
+    DEFAULT_ENGINE = "edge"
+
     def __init__(
         self,
         paths: ApplicationPaths | Path,
@@ -345,6 +351,23 @@ class ProfileService:
                 f"Profile data is missing: {missing_text}"
             )
 
+        engine_value = profile_data.get(
+            "engine",
+            cls.DEFAULT_ENGINE,
+        )
+
+        if not isinstance(engine_value, str):
+            raise ValueError(
+                "Profile field 'engine' must be text."
+            )
+
+        engine = engine_value.strip().lower()
+
+        if engine not in cls.SUPPORTED_ENGINES:
+            raise ValueError(
+                "Profile field 'engine' must be 'edge' or 'azure'."
+            )
+
         language = cls._require_string(
             profile_data,
             "language",
@@ -360,6 +383,7 @@ class ProfileService:
             )
 
         return {
+            "engine": engine,
             "language": language,
             "voice": voice,
             "speed": cls._require_integer(

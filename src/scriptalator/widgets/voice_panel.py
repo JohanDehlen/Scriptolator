@@ -364,6 +364,9 @@ class VoicePanel(QWidget):
             self.settings_service.get_favorite_voices()
         )
         self.preview_text_provider: Callable[[], str] | None = None
+        self._pending_profile_selection: (
+            tuple[str, str] | None
+        ) = None
         self.voice_loading_thread: VoiceLoadingThread | None = None
         self.preview_thread: VoicePreviewThread | None = None
         self.last_preview_path: Path | None = None
@@ -516,6 +519,62 @@ class VoicePanel(QWidget):
 
         self.preview_text_provider = provider
 
+    def apply_profile_selection(
+        self,
+        engine_id: str,
+        language: str,
+        voice: str,
+    ) -> None:
+        """Switch engine and restore a profile voice when ready."""
+
+        self._pending_profile_selection = (
+            language,
+            voice,
+        )
+
+        if engine_id != self.current_engine_id:
+            selected = self.engineSelector.set_engine(engine_id)
+
+            if not selected:
+                self._pending_profile_selection = None
+                raise ValueError(
+                    "The profile speech engine could not be selected."
+                )
+
+            return
+
+        if self.all_voices:
+            self._apply_pending_profile_selection()
+            return
+
+        self.load_voices()
+
+    def _apply_pending_profile_selection(self) -> None:
+        """Apply a deferred profile language and voice."""
+
+        if self._pending_profile_selection is None:
+            return
+
+        language, voice = self._pending_profile_selection
+        self._pending_profile_selection = None
+
+        language_index = self.languageFilter.findData(language)
+
+        if language_index < 0:
+            language_index = 0
+
+        self.languageFilter.setCurrentIndex(language_index)
+
+        voice_index = self.voiceCombo.findText(voice)
+
+        if voice_index < 0:
+            raise ValueError(
+                "The profile voice is not available for its "
+                "saved speech engine."
+            )
+
+        self.voiceCombo.setCurrentIndex(voice_index)
+
     def _show_azure_settings_dialog(self) -> None:
         """Open Azure settings and refresh the selector."""
 
@@ -597,7 +656,18 @@ class VoicePanel(QWidget):
 
         self._populate_languages()
         self._apply_language_filter()
-        self._restore_saved_voice_selection()
+
+        if self._pending_profile_selection is not None:
+            try:
+                self._apply_pending_profile_selection()
+            except ValueError as error:
+                QMessageBox.warning(
+                    self,
+                    "Unable to Restore Profile Voice",
+                    str(error),
+                )
+        else:
+            self._restore_saved_voice_selection()
 
     def _restore_saved_voice_selection(self) -> None:
         """Restore the saved language and voice after loading."""
@@ -623,6 +693,7 @@ class VoicePanel(QWidget):
         """Display a voice-loading error."""
 
         self.all_voices = []
+        self._pending_profile_selection = None
 
         self.languageFilter.clear()
         self.languageFilter.addItem("Languages unavailable")
@@ -1062,24 +1133,62 @@ class VoicePanel(QWidget):
 
         return name or short_name
 
-    @classmethod
     def _voice_display_name(
-        cls,
+        self,
         voice: dict[str, str],
     ) -> str:
-        """Return the friendly voice dropdown label."""
+        """Return a concise friendly voice dropdown label."""
 
         friendly_name = str(
             voice.get("friendly_name", "")
         ).strip()
-        speaker_name = friendly_name or cls._simple_voice_name(
-            voice["short_name"]
-        )
+
+        if (
+            self.current_engine_id
+            == SpeechEngineManager.EDGE_ENGINE_ID
+        ):
+            speaker_name = self._clean_edge_voice_name(
+                friendly_name
+            )
+        else:
+            speaker_name = friendly_name
+
+        if not speaker_name:
+            speaker_name = self._simple_voice_name(
+                voice["short_name"]
+            )
+
         gender = str(
             voice.get("gender", "")
         ).strip() or "Unknown"
 
         return f"{speaker_name} — {gender}"
+
+    @staticmethod
+    def _clean_edge_voice_name(
+        friendly_name: str,
+    ) -> str:
+        """Remove redundant Microsoft and locale text."""
+
+        cleaned_name = friendly_name.strip()
+
+        if cleaned_name.startswith("Microsoft "):
+            cleaned_name = cleaned_name[len("Microsoft "):]
+
+        for suffix in (
+            " Online (Natural)",
+            " Online",
+        ):
+            suffix_index = cleaned_name.find(suffix)
+
+            if suffix_index >= 0:
+                cleaned_name = cleaned_name[:suffix_index]
+                break
+
+        if " - " in cleaned_name:
+            cleaned_name = cleaned_name.split(" - ", 1)[0]
+
+        return cleaned_name.strip()
 
     def _update_speed_label(self, value: int) -> None:
         """Display the current speed adjustment."""

@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import (
@@ -24,7 +25,6 @@ from PySide6.QtWidgets import (
 
 from services.application_paths import ApplicationPaths
 from services.azure_settings_service import AzureSettingsService
-from services.edge_tts_service import EdgeTTSService
 from services.profile_service import ProfileService
 from services.project_service import ProjectService
 from services.logging_service import LoggingService
@@ -54,6 +54,7 @@ class NarrationGenerationThread(QThread):
 
     def __init__(
         self,
+        engine: Any,
         text: str,
         voice: str,
         output_path: Path,
@@ -63,6 +64,7 @@ class NarrationGenerationThread(QThread):
     ) -> None:
         super().__init__()
 
+        self.engine = engine
         self.text = text
         self.voice = voice
         self.output_path = output_path
@@ -74,7 +76,7 @@ class NarrationGenerationThread(QThread):
         """Generate the narration and report the result."""
 
         try:
-            generated_path = EdgeTTSService.generate_mp3(
+            generated_path = self.engine.generate_mp3(
                 text=self.text,
                 voice=self.voice,
                 output_path=self.output_path,
@@ -1019,6 +1021,7 @@ class MainWindow(QMainWindow):
         """Collect the current reusable narration settings."""
 
         return {
+            "engine": self.voicePanel.current_engine_id,
             "language": str(
                 self.voicePanel.languageFilter.currentData() or ""
             ),
@@ -1037,28 +1040,17 @@ class MainWindow(QMainWindow):
         self._applying_profile = True
 
         try:
+            engine = str(
+                profile_data.get("engine", "edge")
+            ).strip().lower()
             language = str(profile_data["language"])
             voice = str(profile_data["voice"])
 
-            language_index = (
-                self.voicePanel.languageFilter.findData(language)
+            self.voicePanel.apply_profile_selection(
+                engine_id=engine,
+                language=language,
+                voice=voice,
             )
-
-            if language_index < 0:
-                language_index = 0
-
-            self.voicePanel.languageFilter.setCurrentIndex(
-                language_index
-            )
-
-            voice_index = self.voicePanel.voiceCombo.findText(voice)
-
-            if voice_index < 0:
-                raise ValueError(
-                    "The profile voice is not currently available."
-                )
-
-            self.voicePanel.voiceCombo.setCurrentIndex(voice_index)
             self.voicePanel.speedSlider.setValue(
                 int(profile_data["speed"])
             )
@@ -1122,6 +1114,7 @@ class MainWindow(QMainWindow):
         self._loaded_profile_data = {
             key: loaded_data[key]
             for key in (
+                "engine",
                 "language",
                 "voice",
                 "speed",
@@ -2038,7 +2031,15 @@ class MainWindow(QMainWindow):
         self._save_voice_preferences()
         self._save_output_folder()
 
+        active_engine = (
+            self.voicePanel.engine_manager.current_engine
+        )
+        active_engine_name = (
+            self.voicePanel.engine_manager.current_engine_name
+        )
+
         self.generation_thread = NarrationGenerationThread(
+            engine=active_engine,
             text=script,
             voice=voice,
             output_path=output_path,
@@ -2066,6 +2067,7 @@ class MainWindow(QMainWindow):
         self.logging_service.info(
             (
                 "Narration generation started: "
+                f"engine={active_engine_name}, "
                 f"voice={voice}, output={output_path}"
             )
         )
@@ -2153,6 +2155,7 @@ class MainWindow(QMainWindow):
         self.outputPanel.browse.setEnabled(enabled)
 
         self.voicePanel.profileControls.setEnabled(enabled)
+        self.voicePanel.engineSelector.setEnabled(enabled)
         self.voicePanel.languageFilter.setEnabled(enabled)
         self.voicePanel.voiceCombo.setEnabled(enabled)
         self.voicePanel.speedSlider.setEnabled(enabled)
@@ -2397,7 +2400,7 @@ class MainWindow(QMainWindow):
             )
 
         if not cls._is_valid_voice(voice):
-            return "Select a valid Microsoft Edge voice."
+            return "Select a valid narration voice."
 
         if not output_folder:
             return "Select an output folder."
@@ -2409,12 +2412,12 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _format_percentage(value: int) -> str:
-        """Format an integer as an Edge TTS percentage adjustment."""
+        """Format an integer as a TTS percentage adjustment."""
 
         return f"{value:+d}%"
 
     @staticmethod
     def _format_pitch(value: int) -> str:
-        """Format an integer as an Edge TTS pitch adjustment."""
+        """Format an integer as a TTS pitch adjustment."""
 
         return f"{value:+d}Hz"
