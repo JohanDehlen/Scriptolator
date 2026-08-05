@@ -2,7 +2,7 @@
 
 **Professional AI Narration**
 
-**Version 1.0.0**
+**Version 1.1.0**
 
 ---
 
@@ -10,7 +10,17 @@
 
 ## What is Scriptolator?
 
-Scriptolator is a Windows desktop application that converts written scripts into professional AI narration using Microsoft's Edge Neural voices.
+Scriptolator is a Windows desktop application that converts written scripts into professional AI narration using Microsoft Edge or Microsoft Azure AI Speech voices.
+
+---
+
+## Which speech engine should I choose?
+
+Choose **Microsoft Edge** when you want free Microsoft voices without configuring an Azure account.
+
+Choose **Microsoft Azure AI Speech** when you want Azure voices, including multilingual voices such as Jorge Multilingual.
+
+Azure is optional.
 
 ---
 
@@ -18,13 +28,31 @@ Scriptolator is a Windows desktop application that converts written scripts into
 
 Yes.
 
-Microsoft's Edge Neural voices are cloud-based and require an active Internet connection when generating narration or previewing voices.
+Both Microsoft Edge and Microsoft Azure AI Speech are cloud-based. An active Internet connection is required for voice discovery, previews and narration generation.
+
+---
+
+## Do I need an Azure account?
+
+No, not when using Microsoft Edge.
+
+To use Microsoft Azure AI Speech, you need an Azure Speech resource, a subscription key and the resource region.
+
+---
+
+## Is the developer's Azure key included with Scriptolator?
+
+No.
+
+Scriptolator does not include the developer's Azure key. Every user who selects Azure must enter their own key and region.
+
+The key is stored securely in Windows Credential Manager on that user's PC. It is not stored in projects, profiles, `settings.ini`, the installer or GitHub.
 
 ---
 
 ## Which operating systems are supported?
 
-Scriptolator Version 1.0.0 is designed for Microsoft Windows 10 and Windows 11.
+Scriptolator Version 1.1.0 is designed for Microsoft Windows 10 and Windows 11.
 
 ---
 
@@ -32,9 +60,9 @@ Scriptolator Version 1.0.0 is designed for Microsoft Windows 10 and Windows 11.
 
 ## What is the difference between a Script and a Project?
 
-A **Script** contains only the narration text.
+A **Script** contains only narration text.
 
-A **Project** stores the script together with narration settings such as the selected voice, profile and other project information so you can continue working later.
+A **Project** stores the script together with narration settings, the selected voice, profile and related project information so you can continue working later.
 
 ---
 
@@ -46,13 +74,24 @@ Projects are stored in the folder you choose when saving them.
 
 ## Where are generated MP3 files stored?
 
-MP3 files are written to your selected output folder.
+MP3 files are written to the output location you select.
 
-The output folder can be changed at any time from within Scriptolator.
+The preferred output folder can be changed from within Scriptolator.
 
 ---
 
-# Voices
+# Speech Engines and Voices
+
+## How do I configure Azure?
+
+1. Open Scriptolator.
+2. Click **Configure Azure...** or open **Tools → Microsoft Azure AI Speech...**.
+3. Enter the subscription key for your Azure Speech resource.
+4. Enter the Azure region, such as `southafricanorth`.
+5. Click **Test Connection**.
+6. Click **Save** after the test succeeds.
+
+---
 
 ## Can I save favourite voices?
 
@@ -60,30 +99,60 @@ Yes.
 
 Click the ☆ button beside the voice list to add a voice to your favourites.
 
-Use the **★ Favorites** language filter to display only your favourite voices.
+Use the **★ Favorites** language filter to display only favourite voices.
 
 ---
 
-## What are Voice Profiles?
+## What are Narration Profiles?
 
-Voice Profiles save combinations of:
+Narration Profiles save combinations of:
 
+- Speech engine
+- Language
 - Voice
 - Speed
 - Pitch
 - Volume
 
-They are useful when creating multiple narrations with the same speaking style.
+Loading a profile restores its saved engine and voice. Profiles created in Version 1.0 remain compatible and use Microsoft Edge by default.
+
+---
+
+## Can I delete a profile?
+
+Yes.
+
+Select the profile and click **Delete**. Scriptolator asks for confirmation before deleting it.
+
+---
+
+# Updates
+
+## Can Version 1.1 be installed over Version 1.0?
+
+Yes.
+
+Close Scriptolator and run the Version 1.1 installer. It uses the same installation identity and updates the existing installation.
+
+Projects, profiles, settings and Azure credentials are stored outside the application installation folder and should remain available.
+
+---
+
+## Does Scriptolator update itself automatically?
+
+Not currently.
+
+To update, download and run the newer Scriptolator installer. You do not normally need to uninstall the previous version first.
 
 ---
 
 # Recovery
 
-## What happens if Scriptolator crashes?
+## What happens if Scriptolator closes unexpectedly?
 
 Scriptolator automatically stores recovery information while you work.
 
-If the application closes unexpectedly, you will be offered the opportunity to restore your work when Scriptolator starts again.
+If the application closes unexpectedly, it offers to restore the recoverable work when Scriptolator starts again.
 
 ---
 
@@ -93,10 +162,12 @@ If the application closes unexpectedly, you will be offered the opportunity to r
 
 Check:
 
-- Your speakers or headphones.
-- Windows volume settings.
-- Your Internet connection.
-- That a valid voice has been selected.
+- Speakers or headphones
+- Windows volume
+- The selected playback device
+- Internet connectivity
+- That a valid voice is selected
+- Azure key and region when using Azure
 
 ---
 
@@ -104,17 +175,19 @@ Check:
 
 Verify:
 
-- Internet connectivity.
-- The selected output folder is writable.
-- The destination file is not already open in another application.
+- Internet connectivity
+- The selected output folder is writable
+- The destination file is not open in another application
+- The correct speech engine is selected
+- Azure is configured correctly when using Azure
 
-If the problem continues, review the application log files.
+Review the application log if the problem continues.
 
 ---
 
 ## Where are log files stored?
 
-Log files are written automatically by Scriptolator and can be used when diagnosing unexpected problems.
+Scriptolator writes diagnostic logs automatically. Their location is shown in the application information and troubleshooting tools.
 
 ---
 
@@ -126,9 +199,10 @@ Additional documentation is available from the Help menu:
 - User Guide
 - Keyboard Shortcuts
 - Troubleshooting Guide
+- Release Notes
 
 ---
 
 © 2026 Johan Dehlen
 
-Scriptolator 1.0.0
+Scriptolator 1.1.0

@@ -2,7 +2,7 @@
 
 **Professional AI Narration**
 
-**Version 1.0.0**
+**Version 1.1.0**
 
 ---
 
@@ -10,7 +10,7 @@
 
 Keyboard shortcuts help you work faster by reducing the need to switch between the keyboard and mouse.
 
-The shortcuts below are the standard shortcuts used throughout Scriptolator Version 1.0.0.
+The shortcuts below are the standard shortcuts used throughout Scriptolator Version 1.1.0.
 
 ---
 
@@ -46,8 +46,11 @@ The shortcuts below are the standard shortcuts used throughout Scriptolator Vers
 |----------|--------|
 | Ctrl+P | Preview narration |
 | Ctrl+G | Generate MP3 |
+| Ctrl+Enter | Generate MP3 |
 | Ctrl+Shift+P | Play generated MP3 |
 | Ctrl+Shift+O | Open output folder |
+
+The active Speech Engine and selected voice are used for both previews and full narration generation.
 
 ---
 
@@ -64,8 +67,10 @@ The shortcuts below are the standard shortcuts used throughout Scriptolator Vers
 # Tips
 
 - Learn the shortcuts you use most often first.
-- Keep one hand on the keyboard while editing scripts.
-- Combine keyboard shortcuts with Voice Profiles for an efficient narration workflow.
+- Confirm the selected Speech Engine before generating narration.
+- Combine keyboard shortcuts with Narration Profiles for an efficient workflow.
+- Azure profiles automatically restore Azure and the saved Azure voice.
+- Use Microsoft Edge when Azure is not configured.
 
 ---
 
@@ -75,9 +80,10 @@ The shortcuts below are the standard shortcuts used throughout Scriptolator Vers
 - User Guide
 - FAQ
 - Troubleshooting
+- Release Notes
 
 ---
 
 © 2026 Johan Dehlen
 
-Scriptolator 1.0.0
+Scriptolator 1.1.0

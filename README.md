@@ -2,26 +2,34 @@
 
 **Transform scripts into professional AI narration**
 
-Scriptolator is a Windows desktop application for turning written scripts into high-quality MP3 narration using Microsoft Edge Neural Voices.
+Scriptolator is a Windows desktop application for turning written scripts into high-quality MP3 narration using Microsoft Edge and Microsoft Azure AI Speech voices.
 
-It is designed for content creators who want a fast, focused narration workflow without subscriptions or per-character generation fees.
+It is designed for content creators who want a fast, focused workflow from written script to finished narration.
 
 ## Current Version
 
-**0.5.0**
-
-Scriptolator is currently in active pre-release development.
+**1.1.0**
 
 ## Features
 
+### Speech Engines
+
+- Microsoft Edge voices
+- Microsoft Azure AI Speech voices
+- Fast switching between speech engines
+- Background voice catalogue loading
+- Secure Azure credential storage through Windows Credential Manager
+- Azure connection testing
+- Safe fallback to Microsoft Edge when Azure is not configured
+
+Microsoft Edge can be used without an Azure account. Microsoft Azure AI Speech is optional and requires each user to provide their own Azure Speech subscription key and region.
+
 ### Narration
 
-- High-quality Microsoft Edge Neural Voices
-- English-first language selection
 - Friendly language and voice names
 - Voice filtering by language
-- Favorite voices
-- Script-based voice preview
+- Favourite voices
+- Script-based voice previews
 - Adjustable speaking speed
 - Adjustable pitch
 - Adjustable volume
@@ -35,8 +43,10 @@ Scriptolator is currently in active pre-release development.
 ### Narration Profiles
 
 - Fully user-defined narration profiles
-- Stores language, voice, speed, pitch, and volume
-- Create, save, rename, and delete profiles
+- Stores speech engine, language, voice, speed, pitch and volume
+- Create, save, rename and delete profiles
+- Automatically restores the saved speech engine and voice
+- Existing Version 1.0 profiles remain compatible and default to Microsoft Edge
 - Shows when a selected profile has unsaved changes
 - Remembers the last selected profile
 - Opens the profiles folder directly
@@ -50,27 +60,38 @@ Scriptolator is currently in active pre-release development.
 - Drag-and-drop `.txt` and `.md` scripts
 - Remembers project narration and output settings
 - Dynamic project name in the window title
+- Automatic recovery after an unexpected shutdown
 
 ### Productivity
 
 - Live word count
 - Estimated narration duration
-- `Ctrl+Enter` to generate narration
+- Keyboard shortcuts
 - Standard File and Edit menu shortcuts
 - Remembers the last output folder
-- Remembers window size, position, and maximized state
+- Remembers window size, position and maximized state
 - Help menu and About dialog
 - Copyable system information for troubleshooting
+- Built-in Quick Start Guide, User Guide, FAQ, Troubleshooting Guide and Release Notes
 
 ## Requirements
 
-- Windows
+### Installed application
+
+- Microsoft Windows 10 or Windows 11
+- Active Internet connection for voice discovery, previews and narration generation
+- An Azure Speech resource only when using Microsoft Azure AI Speech
+
+### Source development
+
 - Python 3.14 or later
 - PySide6
 - edge-tts
 - mutagen
+- azure-cognitiveservices-speech
+- keyring
 
-## Installation
+## Installation from Source
 
 Clone the repository:
 
@@ -109,6 +130,8 @@ run.bat
 
 ```text
 Scriptolator/
+├── docs/
+├── installer/
 ├── src/
 │   └── scriptalator/
 ├── output/
@@ -131,19 +154,13 @@ New projects use:
 
 Legacy `.scriptalator` projects remain supported and can be opened normally.
 
-## Narration Profiles
+## Azure Privacy and Security
 
-Narration profiles are stored in the local `profiles` folder. They are normal JSON files and can be backed up or copied between Scriptolator installations.
+Scriptolator does not include the developer's Azure key.
 
-A profile stores:
+Each user who chooses Microsoft Azure AI Speech must enter their own Azure Speech subscription key and region. The key is stored on that user's PC in Windows Credential Manager and is not written to projects, profiles, `settings.ini`, the installer or the GitHub repository.
 
-- Language
-- Voice
-- Speed
-- Pitch
-- Volume
-
-Project-specific information such as script text, output folder, and output filename remains in the project file rather than the narration profile.
+Users who do not have Azure can continue using Microsoft Edge.
 
 ## Keyboard Shortcuts
 
@@ -162,4 +179,4 @@ Project-specific information such as script text, output folder, and output file
 
 ## Development Status
 
-The current development focus is stability, visual polish, documentation, and preparation for the first public release.
+Version 1.1.0 introduces multi-engine narration with Microsoft Edge and Microsoft Azure AI Speech.
