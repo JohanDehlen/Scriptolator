@@ -803,13 +803,38 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _restore_application_settings(self) -> None:
-        """Restore output preferences.
+        """Restore saved narration and output preferences."""
 
-        Voice and narration controls are restored by VoicePanel after the
-        active engine's voice list has finished loading. This prevents the
-        asynchronous voice loader from overwriting the saved engine-specific
-        voice, language/filter, speed, pitch, or volume.
-        """
+        language = self.settings_service.get_language()
+        voice = self.settings_service.get_voice()
+
+        language_index = self.voicePanel.languageFilter.findData(
+            language
+        )
+
+        if language_index < 0:
+            language_index = 0
+
+        self.voicePanel.languageFilter.setCurrentIndex(
+            language_index
+        )
+
+        voice_index = self.voicePanel.voiceCombo.findText(voice)
+
+        if voice_index >= 0:
+            self.voicePanel.voiceCombo.setCurrentIndex(
+                voice_index
+            )
+
+        self.voicePanel.speedSlider.setValue(
+            self.settings_service.get_speed()
+        )
+        self.voicePanel.pitchSlider.setValue(
+            self.settings_service.get_pitch()
+        )
+        self.voicePanel.volumeSlider.setValue(
+            self.settings_service.get_volume()
+        )
 
         output_folder = self.settings_service.get_output_folder()
 
@@ -829,8 +854,7 @@ class MainWindow(QMainWindow):
             self.voicePanel.languageFilter.currentData() or ""
         )
 
-        self.settings_service.save_engine_voice_settings(
-            engine_id=self.voicePanel.current_engine_id,
+        self.settings_service.save_voice_settings(
             language=str(language),
             voice=voice,
             speed=self.voicePanel.speedSlider.value(),
@@ -938,21 +962,6 @@ class MainWindow(QMainWindow):
         )
         self.voicePanel.volumeSlider.valueChanged.connect(
             self._schedule_recovery_save
-        )
-        self.voicePanel.languageFilter.currentIndexChanged.connect(
-            self._save_voice_preferences
-        )
-        self.voicePanel.voiceCombo.currentIndexChanged.connect(
-            self._save_voice_preferences
-        )
-        self.voicePanel.speedSlider.valueChanged.connect(
-            self._save_voice_preferences
-        )
-        self.voicePanel.pitchSlider.valueChanged.connect(
-            self._save_voice_preferences
-        )
-        self.voicePanel.volumeSlider.valueChanged.connect(
-            self._save_voice_preferences
         )
         self.scriptEditor.script_file_dropped.connect(
             self._load_dropped_script_file

@@ -367,7 +367,6 @@ class VoicePanel(QWidget):
         self._pending_profile_selection: (
             tuple[str, str] | None
         ) = None
-        self._restoring_persisted_settings = False
         self.voice_loading_thread: VoiceLoadingThread | None = None
         self.preview_thread: VoicePreviewThread | None = None
         self.last_preview_path: Path | None = None
@@ -502,22 +501,6 @@ class VoicePanel(QWidget):
         )
         self.volumeSlider.valueChanged.connect(
             self._update_volume_label
-        )
-
-        self.languageFilter.currentIndexChanged.connect(
-            self._persist_current_engine_settings
-        )
-        self.voiceCombo.currentIndexChanged.connect(
-            self._persist_current_engine_settings
-        )
-        self.speedSlider.valueChanged.connect(
-            self._persist_current_engine_settings
-        )
-        self.pitchSlider.valueChanged.connect(
-            self._persist_current_engine_settings
-        )
-        self.volumeSlider.valueChanged.connect(
-            self._persist_current_engine_settings
         )
 
         self.load_voices()
@@ -687,85 +670,24 @@ class VoicePanel(QWidget):
             self._restore_saved_voice_selection()
 
     def _restore_saved_voice_selection(self) -> None:
-        """Restore the last settings for the active speech engine."""
+        """Restore the saved language and voice after loading."""
 
-        engine_id = self.engine_manager.current_engine_id
-        saved = self.settings_service.get_engine_voice_settings(
-            engine_id
+        saved_language = self.settings_service.get_language()
+        saved_voice = self.settings_service.get_voice()
+
+        language_index = self.languageFilter.findData(
+            saved_language
         )
 
-        self._restoring_persisted_settings = True
+        if language_index < 0:
+            language_index = 0
 
-        try:
-            saved_language = str(
-                saved["language"]
-            ).strip()
-            saved_voice = str(
-                saved["voice"]
-            ).strip()
+        self.languageFilter.setCurrentIndex(language_index)
 
-            language_index = self.languageFilter.findData(
-                saved_language
-            )
+        voice_index = self.voiceCombo.findText(saved_voice)
 
-            if language_index < 0:
-                language_index = 0
-
-            self.languageFilter.setCurrentIndex(
-                language_index
-            )
-
-            if saved_voice:
-                voice_index = self.voiceCombo.findText(
-                    saved_voice
-                )
-
-                if voice_index >= 0:
-                    self.voiceCombo.setCurrentIndex(
-                        voice_index
-                    )
-
-            self.speedSlider.setValue(
-                int(saved["speed"])
-            )
-            self.pitchSlider.setValue(
-                int(saved["pitch"])
-            )
-            self.volumeSlider.setValue(
-                int(saved["volume"])
-            )
-        finally:
-            self._restoring_persisted_settings = False
-
-    def _persist_current_engine_settings(
-        self,
-        *_args: object,
-    ) -> None:
-        """Persist the current narration settings for the active engine."""
-
-        if self._restoring_persisted_settings:
-            return
-
-        voice = self.voiceCombo.currentText().strip()
-
-        if not self._is_valid_voice(voice):
-            return
-
-        language = (
-            self.languageFilter.currentData() or ""
-        )
-
-        if not isinstance(language, str):
-            language = str(language)
-
-        self.settings_service.save_engine_voice_settings(
-            engine_id=self.engine_manager.current_engine_id,
-            language=language,
-            voice=voice,
-            speed=self.speedSlider.value(),
-            pitch=self.pitchSlider.value(),
-            volume=self.volumeSlider.value(),
-        )
+        if voice_index >= 0:
+            self.voiceCombo.setCurrentIndex(voice_index)
 
     def _voice_loading_failed(self, error_text: str) -> None:
         """Display a voice-loading error."""

@@ -1,0 +1,501 @@
+import json
+from pathlib import Path
+from typing import Any
+
+from services.application_paths import ApplicationPaths
+
+
+class ProfileService:
+    """Create and manage user-defined narration profile files."""
+
+    FILE_EXTENSION = ".profile"
+    FORMAT_NAME = "Scriptalator Narration Profile"
+    FORMAT_VERSION = 1
+
+    INVALID_FILENAME_CHARACTERS = set('<>:"/\\|?*')
+    RESERVED_WINDOWS_NAMES = {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        *(f"COM{number}" for number in range(1, 10)),
+        *(f"LPT{number}" for number in range(1, 10)),
+    }
+
+    REQUIRED_FIELDS = {
+        "language",
+        "voice",
+        "speed",
+        "pitch",
+        "volume",
+    }
+
+    SUPPORTED_ENGINES = {
+        "edge",
+        "azure",
+    }
+    DEFAULT_ENGINE = "edge"
+
+    def __init__(
+        self,
+        paths: ApplicationPaths | Path,
+    ) -> None:
+        if isinstance(paths, ApplicationPaths):
+            self.profiles_folder = paths.profiles
+        else:
+            self.profiles_folder = (
+                Path(paths).expanduser() / "profiles"
+            )
+
+    def ensure_profiles_folder(self) -> Path:
+        """Create and return the profiles folder."""
+
+        try:
+            self.profiles_folder.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+        except OSError as error:
+            raise RuntimeError(
+                f"Unable to access the profiles folder:\n{error}"
+            ) from error
+
+        return self.profiles_folder
+
+    def list_profiles(self) -> list[str]:
+        """Return user-defined profile names in alphabetical order."""
+
+        profiles_folder = self.ensure_profiles_folder()
+
+        profile_names = {
+            profile_path.stem
+            for profile_path in profiles_folder.glob(
+                f"*{self.FILE_EXTENSION}"
+            )
+            if profile_path.is_file()
+        }
+
+        return sorted(profile_names, key=str.casefold)
+
+    def create_profile(
+        self,
+        profile_name: str,
+        profile_data: dict[str, Any],
+    ) -> Path:
+        """Create a new profile without replacing an existing one."""
+
+        normalized_name = self.validate_profile_name(profile_name)
+        profile_path = self.get_profile_path(normalized_name)
+
+        if profile_path.exists():
+            raise FileExistsError(
+                f'A profile named "{normalized_name}" already exists.'
+            )
+
+        return self._write_profile(
+            profile_name=normalized_name,
+            profile_data=profile_data,
+            profile_path=profile_path,
+        )
+
+    def save_profile(
+        self,
+        profile_name: str,
+        profile_data: dict[str, Any],
+    ) -> Path:
+        """Update an existing narration profile."""
+
+        normalized_name = self.validate_profile_name(profile_name)
+        profile_path = self.get_profile_path(normalized_name)
+
+        if not profile_path.is_file():
+            raise FileNotFoundError(
+                f'Profile not found: "{normalized_name}"'
+            )
+
+        return self._write_profile(
+            profile_name=normalized_name,
+            profile_data=profile_data,
+            profile_path=profile_path,
+        )
+
+    def load_profile(
+        self,
+        profile_name: str,
+    ) -> dict[str, Any]:
+        """Load and validate a narration profile."""
+
+        normalized_name = self.validate_profile_name(profile_name)
+        profile_path = self.get_profile_path(normalized_name)
+
+        if not profile_path.is_file():
+            raise FileNotFoundError(
+                f'Profile not found: "{normalized_name}"'
+            )
+
+        try:
+            file_text = profile_path.read_text(encoding="utf-8")
+        except OSError as error:
+            raise RuntimeError(
+                f"Unable to read the profile:\n{error}"
+            ) from error
+
+        try:
+            file_data = json.loads(file_text)
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                (
+                    f'The profile "{normalized_name}" '
+                    "contains invalid JSON."
+                )
+            ) from error
+
+        if not isinstance(file_data, dict):
+            raise ValueError(
+                "The selected file is not a valid narration profile."
+            )
+
+        if file_data.get("format") != self.FORMAT_NAME:
+            raise ValueError(
+                "The selected file is not a Scriptolator profile."
+            )
+
+        if file_data.get("format_version") != self.FORMAT_VERSION:
+            raise ValueError(
+                "This profile uses an unsupported format version."
+            )
+
+        stored_name = file_data.get("name")
+        profile_data = file_data.get("profile")
+
+        if not isinstance(stored_name, str):
+            raise ValueError(
+                "The profile name is missing or invalid."
+            )
+
+        if not isinstance(profile_data, dict):
+            raise ValueError(
+                "The narration profile data is missing or invalid."
+            )
+
+        validated_data = self.validate_profile_data(profile_data)
+        validated_data["name"] = stored_name.strip()
+
+        return validated_data
+
+    def rename_profile(
+        self,
+        current_name: str,
+        new_name: str,
+    ) -> Path:
+        """Rename an existing narration profile."""
+
+        normalized_current_name = self.validate_profile_name(
+            current_name
+        )
+        normalized_new_name = self.validate_profile_name(new_name)
+
+        current_path = self.get_profile_path(
+            normalized_current_name
+        )
+        new_path = self.get_profile_path(normalized_new_name)
+
+        if not current_path.is_file():
+            raise FileNotFoundError(
+                f'Profile not found: "{normalized_current_name}"'
+            )
+
+        if current_path != new_path and new_path.exists():
+            raise FileExistsError(
+                f'A profile named "{normalized_new_name}" already exists.'
+            )
+
+        profile_data = self.load_profile(
+            normalized_current_name
+        )
+        profile_data.pop("name", None)
+
+        if current_path == new_path:
+            return self._write_profile(
+                profile_name=normalized_new_name,
+                profile_data=profile_data,
+                profile_path=new_path,
+            )
+
+        self._write_profile(
+            profile_name=normalized_new_name,
+            profile_data=profile_data,
+            profile_path=new_path,
+        )
+
+        try:
+            current_path.unlink()
+        except OSError as error:
+            try:
+                new_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+            raise RuntimeError(
+                f"Unable to complete the profile rename:\n{error}"
+            ) from error
+
+        return new_path
+
+    def delete_profile(
+        self,
+        profile_name: str,
+    ) -> None:
+        """Delete an existing narration profile."""
+
+        normalized_name = self.validate_profile_name(profile_name)
+        profile_path = self.get_profile_path(normalized_name)
+
+        if not profile_path.is_file():
+            raise FileNotFoundError(
+                f'Profile not found: "{normalized_name}"'
+            )
+
+        try:
+            profile_path.unlink()
+        except OSError as error:
+            raise RuntimeError(
+                f"Unable to delete the profile:\n{error}"
+            ) from error
+
+    def get_profile_path(
+        self,
+        profile_name: str,
+    ) -> Path:
+        """Return the file path for a validated profile name."""
+
+        normalized_name = self.validate_profile_name(profile_name)
+
+        return self.ensure_profiles_folder() / (
+            normalized_name + self.FILE_EXTENSION
+        )
+
+    @classmethod
+    def validate_profile_name(
+        cls,
+        profile_name: str,
+    ) -> str:
+        """Validate a user-defined profile name."""
+
+        if not isinstance(profile_name, str):
+            raise TypeError(
+                "The profile name must be text."
+            )
+
+        normalized_name = profile_name.strip()
+
+        if not normalized_name or normalized_name in {".", ".."}:
+            raise ValueError("Enter a valid profile name.")
+
+        if normalized_name.endswith((".", " ")):
+            raise ValueError(
+                "A profile name cannot end with a period or space."
+            )
+
+        invalid_characters = sorted(
+            {
+                character
+                for character in normalized_name
+                if (
+                    ord(character) < 32
+                    or character
+                    in cls.INVALID_FILENAME_CHARACTERS
+                )
+            }
+        )
+
+        if invalid_characters:
+            invalid_text = " ".join(invalid_characters)
+            raise ValueError(
+                (
+                    "The profile name contains invalid characters: "
+                    f"{invalid_text}"
+                )
+            )
+
+        reserved_base_name = (
+            normalized_name.split(".", 1)[0].upper()
+        )
+
+        if reserved_base_name in cls.RESERVED_WINDOWS_NAMES:
+            raise ValueError(
+                f'"{normalized_name}" is reserved by Windows.'
+            )
+
+        return normalized_name
+
+    @classmethod
+    def validate_profile_data(
+        cls,
+        profile_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Validate and normalize narration profile settings."""
+
+        if not isinstance(profile_data, dict):
+            raise TypeError(
+                "Profile data must be provided as a dictionary."
+            )
+
+        missing_fields = (
+            cls.REQUIRED_FIELDS - profile_data.keys()
+        )
+
+        if missing_fields:
+            missing_text = ", ".join(sorted(missing_fields))
+            raise ValueError(
+                f"Profile data is missing: {missing_text}"
+            )
+
+        engine_value = profile_data.get(
+            "engine",
+            cls.DEFAULT_ENGINE,
+        )
+
+        if not isinstance(engine_value, str):
+            raise ValueError(
+                "Profile field 'engine' must be text."
+            )
+
+        engine = engine_value.strip().lower()
+
+        if engine not in cls.SUPPORTED_ENGINES:
+            raise ValueError(
+                "Profile field 'engine' must be 'edge' or 'azure'."
+            )
+
+        language = cls._require_string(
+            profile_data,
+            "language",
+        )
+        voice = cls._require_string(
+            profile_data,
+            "voice",
+        )
+
+        if not voice:
+            raise ValueError(
+                "Select a narration voice before saving a profile."
+            )
+
+        return {
+            "engine": engine,
+            "language": language,
+            "voice": voice,
+            "speed": cls._require_integer(
+                profile_data,
+                "speed",
+                minimum=-100,
+                maximum=100,
+            ),
+            "pitch": cls._require_integer(
+                profile_data,
+                "pitch",
+                minimum=-100,
+                maximum=100,
+            ),
+            "volume": cls._require_integer(
+                profile_data,
+                "volume",
+                minimum=0,
+                maximum=100,
+            ),
+        }
+
+    def _write_profile(
+        self,
+        profile_name: str,
+        profile_data: dict[str, Any],
+        profile_path: Path,
+    ) -> Path:
+        """Write validated profile data atomically."""
+
+        validated_data = self.validate_profile_data(
+            profile_data
+        )
+
+        file_data = {
+            "format": self.FORMAT_NAME,
+            "format_version": self.FORMAT_VERSION,
+            "name": profile_name,
+            "profile": validated_data,
+        }
+
+        temporary_path = profile_path.with_suffix(
+            profile_path.suffix + ".tmp"
+        )
+
+        try:
+            self.ensure_profiles_folder()
+
+            temporary_path.write_text(
+                json.dumps(
+                    file_data,
+                    indent=4,
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            temporary_path.replace(profile_path)
+        except OSError as error:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+            raise RuntimeError(
+                f"Unable to save the profile:\n{error}"
+            ) from error
+
+        if not profile_path.is_file():
+            raise RuntimeError(
+                "The narration profile file was not created."
+            )
+
+        return profile_path.resolve()
+
+    @staticmethod
+    def _require_string(
+        profile_data: dict[str, Any],
+        field_name: str,
+    ) -> str:
+        """Return a text profile value."""
+
+        value = profile_data.get(field_name)
+
+        if not isinstance(value, str):
+            raise ValueError(
+                f"Profile field '{field_name}' must be text."
+            )
+
+        return value.strip()
+
+    @staticmethod
+    def _require_integer(
+        profile_data: dict[str, Any],
+        field_name: str,
+        minimum: int,
+        maximum: int,
+    ) -> int:
+        """Return an integer profile value within its allowed range."""
+
+        value = profile_data.get(field_name)
+
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(
+                f"Profile field '{field_name}' must be an integer."
+            )
+
+        if not minimum <= value <= maximum:
+            raise ValueError(
+                (
+                    f"Profile field '{field_name}' must be between "
+                    f"{minimum} and {maximum}."
+                )
+            )
+
+        return value
